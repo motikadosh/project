@@ -504,9 +504,10 @@ void calcPoseEstimation()
     std::vector<cv::Point2f> points2d;
     for (auto p : marked2Dpoints)
         points2d.push_back(cv::Point2f(p.x, p.y));
+        //points2d.push_back(cv::Point2f((p.x/(float)cvPhoto.cols - 0.5)*2, p.y/((float)cvPhoto.rows - 0.5)*2));
 
     findProjectionMatrix(points3d, points2d);
-    //updateWindows();
+    updateWindows();
 
     cv::Size imageSize = cvPhoto.size();
 
@@ -1131,7 +1132,7 @@ void drawEdgesInViewAfterProjection()
         std::vector<trimesh::point> edgeVertices = { themesh->vertices[edge.first], themesh->vertices[edge.second] };
 
         std::vector<cv::Point> p2d = projectCvPoints(conv3dPointTrimeshToOpenCV(edgeVertices), projMat);
-        cv::line(cvShowPhoto, p2d[0], p2d[1], blue);
+        cv::line(cvShowPhoto, p2d[0], p2d[1], blue, 2);
     }
 
     DBG("Done");
@@ -1181,7 +1182,7 @@ void drawEdgesInViewAfterProjectionWithIntrinsicMatrix()
         std::vector<cv::Point2f> projectedLine;
         cv::projectPoints(conv3dPointTrimeshToOpenCV(edgeVertices), rvec, tvec, intrinsicMatrix, cv::noArray(),
             projectedLine);
-        cv::line(cvShowPhoto, projectedLine[0], projectedLine[1], green);
+        cv::line(cvShowPhoto, projectedLine[0], projectedLine[1], green, 2);
     }
 
     DBG("Done");
