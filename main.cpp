@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <random>
 
 #define FS_DELIMITER_LINUX "/"
 #define FS_DELIMITER_WINDOWS "\\"
@@ -70,12 +71,17 @@ const float PI = 3.14159265358979323846264f;
 #define SPACE_KEY       32
 #define KEY_TAB         9
 
-#define KEY_LEFT        'Q'
-#define KEY_RIGHT       'S'
-#define KEY_UP          'R'
-#define KEY_DOWN        'T'
-
 #define KEY_ENTER       13
+#define KEY_DELETE      255
+#define KEY_BACKSPACE   8
+#define KEY_HOME        80
+#define KEY_LEFT        81
+#define KEY_UP          82
+#define KEY_RIGHT       83
+#define KEY_DOWN        84
+#define KEY_PAGEUP      85
+#define KEY_PAGEDOWN    86
+#define KEY_END         87
 
 /*
 #if defined(_MSC_VER) || defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(WIN64) || \
@@ -144,27 +150,46 @@ CV_COLOR(pink,    203, 192, 255);
 CV_COLOR(purple,  128, 0, 128);
 CV_COLOR(voilet,  255, 0, 127);
 
+std::vector<const GLfloat *> glColorsVec = {
+    greenGL,
+    redGL,
+    blueGL,
+    blackGL,
+    yellowGL,
+    magentaGL,
+    orangeGL,
+    azulGL,
+    brownGL,
+    grayGL,
+    pinkGL,
+    purpleGL,
+    voiletGL
+};
+
 //
 // Globals
 //
-// TODO: Use GL colors instead of CV
-cv::Scalar backgroundColor = white;
-cv::Scalar facesColor = backgroundColor;
-const GLfloat *groundColorGL = whiteGL; // whiteGL;
+GLfloat const *backgroundColorGL = whiteGL;
+GLfloat const *facesColorGL = backgroundColorGL;
+const GLfloat *groundColorGL = whiteGL;
 
 trimesh::GLCamera camera;
 trimesh::xform xf; // Current location and orientation
 std::string xfFileName;
-bool menuOn = false;
-bool taggingOn = false;
 int dbgCount = 0;
+
+enum KeysGroup {
+    KEYS_GROUP_NAV = 1,
+    KEYS_GROUP_MENU,
+    KEYS_GROUP_TAG
+};
+KeysGroup gKeysGroup = KEYS_GROUP_NAV;
 
 int winWidth = 800;
 int winHeight = 600;
 float fov = 0.7f;
-float rotStep = M_PI / 36.0; // 10 degrees
-int xyStep = 10;
-int zStep = 100;
+float rotStep = DEG_TO_RAD(10);
+float xyzStep = 1;
 
 std::unique_ptr<trimesh::TriMesh> themesh;
 std::vector<std::pair<int, int> > edges;
@@ -190,6 +215,8 @@ cv::Mat projMat;
 
 int marksRadius = 4;
 
+bool gAutoNavigation = false;
+unsigned gAutoNavigationIdx = 0;
 
 //
 // Pre-declarations
@@ -199,6 +226,14 @@ void updateWindows();
 //
 // Utilities
 //
+
+template <typename T1, typename T2>
+inline std::ostream& operator<<(std::ostream &out, const std::pair<T1, T2> &pair)
+{
+    out << "(" << pair.first << ", " << pair.second << ")";
+
+    return out;
+}
 
 template <typename T>
 inline std::ostream& operator<<(std::ostream &out, const std::vector<T> &vector)
@@ -670,7 +705,7 @@ void drawFaces()
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, 0, &themesh->vertices[0][0]);
 
-    glColor3f(facesColor[2] / 255.0f, facesColor[1] / 255.0f, facesColor[0] / 255.0f);
+    glColor3fv(facesColorGL);
 
     // Draw the mesh, possibly with color and/or lighting
     glDepthFunc(GL_LESS);
@@ -688,14 +723,37 @@ void drawFaces()
     glCallList(1);
     glDisableClientState(GL_VERTEX_ARRAY);
 
-    drawGround();
+    //drawGround();
 }
 
+void getRgbFromInt(int rgbColor, unsigned &r, unsigned &g, unsigned &b)
+{
+    r = (rgbColor & 0xFF0000) >> 16;
+    g = (rgbColor & 0xFF00) >> 8;
+    b = rgbColor & 0xFF;
+}
+
+void drawEdge(int vertex1, int vertex2, int rgbColor)
+{
+#if 1
+    unsigned r, g, b;
+    getRgbFromInt(rgbColor, r, g, b);
+    GLfloat color[3] = { (float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f };
+#else
+    GLfloat const * color = glColorsVec[rgbColor % glColorsVec.size()];
+#endif
+    glColor3fv(color);
+
+    // Draw the edge
+    glVertex3fv(themesh->vertices[vertex1]);
+    glVertex3fv(themesh->vertices[vertex2]);
+}
+
+// Currently not used. Kept for reference.
+// If used, notice current edges color is by faces indexes and not edges, i.e. not unique
 void drawBoundaries()
 {
-    edges.clear();
-
-    glLineWidth(1);
+    glLineWidth(2);
 
     glBegin(GL_LINES);
     for (unsigned i = 0; i < themesh->faces.size(); i++)
@@ -705,34 +763,23 @@ void drawBoundaries()
             if (themesh->across_edge[i][j] >= 0)
                 continue;
 
-            // Mapping of vector index to color. I.e. first edge will be black(0, 0, 0)
-            unsigned rgbColor = edges.size();
-            unsigned r, g, b;
-            r = (rgbColor & 0xFF0000) >> 16;
-            g = (rgbColor & 0xFF00) >> 8;
-            b = rgbColor & 0xFF;
-            glColor3f((float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f);
-
             int v1 = themesh->faces[i][(j + 1) % 3];
             int v2 = themesh->faces[i][(j + 2) % 3];
-
-            edges.push_back(std::make_pair(v1, v2)); // Add the edge to edges vector
-
-            // Draw the edge
-            glVertex3fv(themesh->vertices[v1]);
-            glVertex3fv(themesh->vertices[v2]);
+            drawEdge(v1, v2, i);
         }
     }
     glEnd();
-
-    //DBG("Edges vector size: " << edges.size());
 }
 
-void getRgbFromInt(int num, unsigned &r, unsigned &g, unsigned &b)
+void drawEdges()
 {
-    r = (num & 0xFF0000) >> 16;
-    g = (num & 0xFF00) >> 8;
-    b = num & 0xFF;
+    glLineWidth(1);
+
+    glBegin(GL_LINES);
+    // Mapping of vector index to color. I.e. first edge will be black(0, 0, 0)
+    for (unsigned i = 0; i < edges.size(); i++)
+        drawEdge(edges[i].first, edges[i].second, i);
+    glEnd();
 }
 
 void drawVertexes()
@@ -771,7 +818,7 @@ void drawVertexes()
 void cls()
 {
     // TODO: Try removing the Alpha argument
-    glClearColor(backgroundColor[2] / 255.0f, backgroundColor[1] / 255.0f, backgroundColor[0] / 255.0f,  1);
+    glClearColor(backgroundColorGL[0], backgroundColorGL[1], backgroundColorGL[2],  1);
     glClearDepth(1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -779,7 +826,7 @@ void cls()
 void drawMarkedPoints()
 {
     glPointSize(4);
-    glColor3f((float)red[2] / 255.0f, (float)red[1] / 255.0f, (float)red[0] / 255.0f);
+    glColor3fv(redGL);
 
     glBegin(GL_POINTS);
     for (auto p : marked3Dpoints)
@@ -849,6 +896,8 @@ void redrawVertex(void *userData)
 
 void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
 {
+    //DBG(edges);
+    //DBG("\n" << xf);
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
@@ -856,7 +905,8 @@ void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
     glMultMatrixd((double *)xf);
 
     drawFaces();
-    drawBoundaries();
+    //drawBoundaries();
+    drawEdges();
     drawMarkedPoints();
 
     glPopMatrix(); // Don't forget to pop the Matrix
@@ -933,6 +983,8 @@ void redrawPhoto(void *userData)
 // Set the view to look at the middle of the mesh, from reasonably far away or use xfFile if available
 void resetView()
 {
+    DBG_T("Entered");
+
     if (xf.read(xfFileName))
     {
         DBG("Reset view from " << xfFileName);
@@ -948,13 +1000,15 @@ void resetView()
 // Set the view to look at the middle of the mesh, from reasonably far away
 void upperView()
 {
+    DBG_T("Entered");
+
     DBG("Reset view to look at the middle of the mesh, from reasonably far away");
     xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
         trimesh::xform::trans(-themesh->bsphere.center);
 }
 
 // Angles are in radians
-trimesh::XForm<double> getRotMat(float yaw = 0.0, float pitch = 0.0, float roll = 0.0)
+trimesh::XForm<double> getCamRotMatRad(float yaw = 0.0, float pitch = 0.0, float roll = 0.0)
 {
     float a = roll, b = yaw, c = pitch;
 
@@ -976,22 +1030,41 @@ trimesh::XForm<double> getRotMat(float yaw = 0.0, float pitch = 0.0, float roll 
     return rotMat;
 }
 
+trimesh::XForm<double> getCamRotMatDeg(float yaw = 0.0, float pitch = 0.0, float roll = 0.0)
+{
+    return getCamRotMatRad(DEG_TO_RAD(yaw), DEG_TO_RAD(pitch), DEG_TO_RAD(roll));
+}
+
+std::string getTimeStamp()
+{
+    char date[20];
+    time_t t = time(0);
+    struct tm *tm;
+
+    tm = gmtime(&t);
+    strftime(date, sizeof(date), "%Y%m%d-%H:%M", tm);
+
+    return date;
+}
+
 #define IMAGE_FORMAT_EXT "png"
 
 // Save the current screen to PNG/PPM file
-void takeScreenshot()
+std::string takeScreenshot()
 {
     DBG_T("Entered");
 
+    cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
+
     // Find first non-used filename
-    const char fileNamePattern[] = "sample_images/img%d." IMAGE_FORMAT_EXT;
+    std::string fileNamePattern = "sample_images/img_" + getTimeStamp() + "_%d." IMAGE_FORMAT_EXT;
     int imgNum = 0;
     FILE *f;
     char fileName[1024];
 
     while (1)
     {
-        sprintf(fileName, fileNamePattern, imgNum++);
+        sprintf(fileName, fileNamePattern.c_str(), imgNum++);
         f = fopen(fileName, "rb");
         if (!f)
         {
@@ -1026,7 +1099,7 @@ void takeScreenshot()
         if (!f)
         {
             std::cout << "Failed saving file " << fileName << std::cout;
-            return;
+            return std::string();
         }
 
         fprintf(f, "P6\n%d %d\n255\n", width, height);
@@ -1039,7 +1112,10 @@ void takeScreenshot()
         // http://stackoverflow.com/questions/9097756/converting-data-from-glreadpixels-to-opencvmat
         cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
         if (!cv::imwrite(fileName, img))
+        {
             std::cout << "Failed saving file " << fileName << std::cout;
+            return std::string();
+        }
 
         // Show image
         //std::string cvWindowName = "screenshot";
@@ -1048,7 +1124,8 @@ void takeScreenshot()
         //cv::waitKey(0);
     }
 
-    DBG_T("Done");
+    DBG_T("Done. fileName: " << fileName);
+    return fileName;
 }
 
 void printMatDetailed(const std::string &name, const cv::Mat &mat)
@@ -1115,8 +1192,8 @@ std::vector<int> findEdgesInView(bool bothVertexesInView)
                 edgesInView.push_back(i);
         }
     }
-    //moti
 */
+
     DBG("Edges in view size: " << edgesInView.size());
     return edgesInView;
 }
@@ -1200,7 +1277,6 @@ void updateCvWindow()
         for (auto p : marked2Dpoints)
             cv::circle(cvShowPhoto, p, marksRadius, red, -1);
 
-        //moti
         //for (auto p : projectedVertexesInView)
           //  cv::circle(cvShowPhoto, p, marksRadius, blue, -1);
 
@@ -1389,6 +1465,46 @@ void initWindow(const std::string &winName, int winWidth, int winHeight, void (*
     cv::setOpenGlDrawCallback(winName, redrawFunc, 0); // Set OpenGL render handler for the specified window
 }
 
+void populateModelEdges(float maxDihedralAngle = 135)
+{
+    std::set<std::pair<int, int> > edgesSet;
+    for (unsigned i = 0; i < themesh->faces.size(); i++)
+    {
+        for (unsigned j = 0; j < 3; j++)
+        {
+
+            // Calculate angle between 2 faces normals, if there is no adjacent face (Boundary), returned angle is 0
+            float angle = RAD_TO_DEG(themesh->dihedral(i, j));
+            //DBG("Angle between face " << i << " to across edge number " << j << " is " << angle);
+
+            // Skip faces that almost overlap (Probably curvatures)
+            if (angle > maxDihedralAngle)
+                continue;
+
+            int v1 = themesh->faces[i][(j + 1) % 3];
+            int v2 = themesh->faces[i][(j + 2) % 3];
+
+            // To make sure only unique edges enter the set I make sure first element is always bigger than second
+            std::pair<int, int> edge;
+            if (v1 > v2)
+                edge = std::make_pair(v1, v2);
+            else
+                edge = std::make_pair(v2, v1);
+
+            edgesSet.insert(edge);
+        }
+    }
+
+    // Now the set of edges is ready and without any duplicates, I convert it to a vector to have easier access and
+    // support already written code.
+
+    edges.clear();
+    for (auto edge : edgesSet)
+        edges.push_back(edge);
+
+    DBG("Edges vector size: " << edges.size());
+}
+
 void loadModel(const std::string &fileName)
 {
     themesh = std::unique_ptr<trimesh::TriMesh>(trimesh::TriMesh::read(fileName));
@@ -1400,11 +1516,15 @@ void loadModel(const std::string &fileName)
 
     themesh->need_tstrips();
     themesh->need_bsphere();
+    //themesh->need_bbox();
+    //DBG("bbox center: " << themesh->bbox.center() << ", bbox radius: " << themesh->bbox.radius());
     themesh->need_normals();
     themesh->need_curvatures();
     themesh->need_dcurv();
     themesh->need_faces();
     themesh->need_across_edge();
+
+    populateModelEdges(135);
 
     DBG("Mesh file [" << fileName << "] loaded");
     DBG("Vertices num [" << themesh->vertices.size() << "], faces num [" << themesh->faces.size() <<
@@ -1419,6 +1539,8 @@ void loadModel(const std::string &fileName)
 
 void handleMenuKeyboard(int key)
 {
+    //DBG("key [" << key << "], char [" << (char)key << "]");
+
     switch (key)
     {
     case 's':
@@ -1428,7 +1550,7 @@ void handleMenuKeyboard(int key)
 
     case 'c':
         std::cout << "Toggle faces-color (black/white)" << std::endl;
-        facesColor = facesColor == white ? black : white;
+        facesColorGL = facesColorGL == whiteGL ? blackGL : whiteGL;
         break;
 
     case 'i':
@@ -1459,8 +1581,20 @@ void handleMenuKeyboard(int key)
     }
 }
 
+void setAutoNavState(bool newState)
+{
+    gAutoNavigation = newState;
+    DBG("gAutoNavigation: " << gAutoNavigation);
+}
+
 void handleNavKeyboard(int key)
 {
+    if (gAutoNavigation && key != 'g')
+    {
+        DBG("Nav commands not allowd in autoNavigation mode. Press 'g' to exit this mode");
+        return;
+    }
+
     if (key >= '0' && key <= '9')
     {
         std::string xfFile = trimesh::replace_ext(xfFileName, "") + std::string((const char *)&key) + ".xf";
@@ -1487,69 +1621,63 @@ void handleNavKeyboard(int key)
         upperView();
         break;
 
+    case 'g':
+        setAutoNavState(!gAutoNavigation);
+        break;
+
     case '+':
-        xyStep += 10;
-        DBG("Increased xyStep to " << xyStep);
+        xyzStep *= 2;
+        DBG("Increased xyzStep to " << xyzStep);
         break;
     case '-':
-        xyStep -= 10;
-        DBG("Decreased xyStep to " << xyStep);
+        xyzStep /= 2;
+        DBG("Decreased xyzStep to " << xyzStep);
         break;
-
-    case '.':
-        zStep += 10;
-        DBG("Increased zStep to " << zStep);
-        break;
-    case ',':
-        zStep -= 10;
-        DBG("Decreased zStep to " << zStep);
-        break;
-
         // Camera Position - XY
     case KEY_LEFT:
-        xf = trimesh::xform::trans(xyStep, 0, 0) * xf;
+        xf = trimesh::xform::trans(xyzStep, 0, 0) * xf;
         break;
     case KEY_RIGHT:
-        xf = trimesh::xform::trans(-xyStep, 0, 0) * xf;
+        xf = trimesh::xform::trans(-xyzStep, 0, 0) * xf;
         break;
 
     case KEY_UP:
-        xf = trimesh::xform::trans(0, -xyStep, 0) * xf;
+        xf = trimesh::xform::trans(0, -xyzStep, 0) * xf;
         break;
     case KEY_DOWN:
-        xf = trimesh::xform::trans(0, xyStep, 0) * xf;
+        xf = trimesh::xform::trans(0, xyzStep, 0) * xf;
         break;
 
         // Camera Position - Z - Zoom
     case ']':
-        xf = trimesh::xform::trans(0, 0, zStep) * xf;
+        xf = trimesh::xform::trans(0, 0, xyzStep) * xf;
         break;
     case '[':
-        xf = trimesh::xform::trans(0, 0, -zStep) * xf;
+        xf = trimesh::xform::trans(0, 0, -xyzStep) * xf;
         break;
 
         // Camera Angle - Roll
     case 'e':
-        xf = getRotMat(0.0, 0.0, rotStep) * xf;
+        xf = getCamRotMatRad(0.0, 0.0, rotStep) * xf;
         break;
     case 'q':
-        xf = getRotMat(0.0, 0.0, -rotStep) * xf;
+        xf = getCamRotMatRad(0.0, 0.0, -rotStep) * xf;
         break;
 
         // Camera Angle - Yaw
     case 'a':
-        xf = getRotMat(-rotStep, 0.0, 0.0) * xf;
+        xf = getCamRotMatRad(-rotStep, 0.0, 0.0) * xf;
         break;
     case 'd':
-        xf = getRotMat(rotStep, 0.0, 0.0) * xf;
+        xf = getCamRotMatRad(rotStep, 0.0, 0.0) * xf;
         break;
 
         // Camera Angle - Pitch
     case 'w':
-        xf = getRotMat(0.0, -rotStep, 0.0) * xf;
+        xf = getCamRotMatRad(0.0, -rotStep, 0.0) * xf;
         break;
     case 's':
-        xf = getRotMat(0.0, rotStep, 0.0) * xf;
+        xf = getCamRotMatRad(0.0, rotStep, 0.0) * xf;
         break;
 
     default:
@@ -1670,47 +1798,170 @@ void handleTagKeyboard(int key)
 
 void handleKeyboard(int key)
 {
+    if ((char)key == -1)
+        return;
+
+#if __linux__
+    key &= 0xff;
+#endif
+
     //DBG("key [" << key << "], char [" << (char)key << "]");
 
-    if (key == 't')
+    switch (key)
     {
-        taggingOn = !taggingOn;
-        if (taggingOn)
-        {
-            menuOn = true;
-            cv::setMouseCallback(MAIN_WINDOW_NAME, mouseTagCallbackFunc3D, NULL);
-            DBG("Tagging mode ON");
-        }
-        else
-        {
-            menuOn = false;
-            cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
-            DBG("Tagging mode OFF");
-        }
+    case 'n':
+        gKeysGroup = KEYS_GROUP_NAV;
+        cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
+        DBG("Navigation mode");
+        return;
+
+    case 'm':
+        gKeysGroup = KEYS_GROUP_MENU;
+        DBG("Menu mode");
+        return;
+
+    case 't':
+        gKeysGroup = KEYS_GROUP_TAG;
+        cv::setMouseCallback(MAIN_WINDOW_NAME, mouseTagCallbackFunc3D, NULL);
+        DBG("Tagging mode");
         return;
     }
 
-    if (taggingOn)
+    switch (gKeysGroup)
     {
-        handleTagKeyboard(key);
-        return;
-    }
-
-    if (key == 'm')
-    {
-        menuOn = !menuOn; // toggle
-        DBG("Menu state changed: " << menuOn);
-        return;
-    }
-
-    if (menuOn)
-    {
-        handleMenuKeyboard(key);
-        menuOn = false;
-    }
-    else
-    {
+    case KEYS_GROUP_NAV:
         handleNavKeyboard(key);
+        break;
+
+    case KEYS_GROUP_MENU:
+        handleMenuKeyboard(key);
+        break;
+
+    case KEYS_GROUP_TAG:
+        handleTagKeyboard(key);
+        break;
+    }
+}
+
+std::vector<trimesh::xform> xfSamples;
+std::vector<std::string> sampleData;
+void populateXfVector(unsigned xyPositionsNumber)
+{
+    std::random_device rd;  //Will be used to obtain a seed for the random number engine
+    std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
+
+    float rad = themesh->bsphere.r;
+    trimesh::vec center = themesh->bsphere.center;
+
+    // Make the radius a bit bigger so we would catch the model from also "outside"
+    // This should probably be a function of the max height and the FOV or a const.
+    // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
+    rad *= 5;
+
+    std::uniform_real_distribution<> disX(-rad, rad);
+    std::uniform_real_distribution<> disY(-rad, rad);
+
+    float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
+
+    for (unsigned xyPos = 0; xyPos < xyPositionsNumber; xyPos++)
+    {
+        // Use dis to transform the random unsigned int generated by gen into a double in [1, 2)
+        // Each call to dis(gen) generates a new random double
+        float x = disX(gen);
+        float y = disY(gen);
+        DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
+
+        // TODO: Remove
+        x = 0; y = 8;
+
+        // Determine the x,y position.
+        trimesh::xform sampleXf = trimesh::xform::trans(x, y, 0) *
+            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], -groundZ);
+        DBG("sampleXf:\n" << sampleXf);
+
+        // Base rotation so we will be looking horizontally
+        sampleXf = getCamRotMatDeg(0.0, -90, 0.0) * sampleXf;
+
+        // TODO: Should add height (z-axis) position. Probably should sample some height randomize also.
+
+        for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
+        {
+            trimesh::xform rotatedYawXf = getCamRotMatDeg(yawDeg, 0.0, 0.0);
+            DBG("rotatedYawXf:\n" << rotatedYawXf);
+
+            // Remember that negative pitch values are UP
+            for (float pitchDeg = -30;  pitchDeg <= 5; pitchDeg += 5)
+            {
+                trimesh::xform rotatedPitchXf = getCamRotMatDeg(0.0, pitchDeg, 0.0);
+                DBG("rotatedPitchXf:\n" << rotatedPitchXf);
+
+                trimesh::xform rotatedXf =  rotatedYawXf * rotatedPitchXf * sampleXf;
+                xfSamples.push_back(rotatedXf);
+
+                std::stringstream ss;
+                ss << "(x,y,yaw,pitch)=(" << x << ", " << y << ", " << yawDeg << ", " << pitchDeg << ")";
+                sampleData.push_back(ss.str());
+
+                //DBG("yawDeg: " << yawDeg << ", pitchDeg: " << pitchDeg << ", after rotation xf:\n" << rotatedXf);
+                //std::cin.get();
+            }
+        }
+    }
+
+    DBG("We now have total of [" << xfSamples.size() << "] xf samples");
+}
+
+std::string projectionMatToStr(const trimesh::xform &xf)
+{
+    DBG(xf);
+    std::stringstream ss;
+
+    ss << std::setprecision(17);
+    for (auto i : xf)
+        ss << "_" << i;
+
+    DBG(ss.str());
+    return ss.str();
+}
+
+std::string getFilePathNoExt(const std::string &filePath)
+{
+    size_t pos = filePath.find_last_of(".");
+    if (pos == std::string::npos) // No file extension
+        return filePath;
+
+    return filePath.substr(0, pos);
+}
+
+void autoNavigate()
+{
+    // Take screenshot of current pose and save the XF file in identical fileName
+    // Skip 1st entry here since it is the pose before starting autoNavigation
+    // FIXME: The last image will not be taken. Probably not worth fixing.
+    if (gAutoNavigationIdx)
+    {
+        std::string imageFilePath = takeScreenshot();
+        std::string xfFilePath = getFilePathNoExt(imageFilePath) + ".xf";
+        xf.write(xfFilePath);
+
+        // Sanity
+        if (xf != xfSamples[gAutoNavigationIdx - 1])
+        {
+            throw std::runtime_error("Somhow the XF was modified before we returned here. This might suggest the "
+                "rendered image is not we think");
+        }
+    }
+
+    xf = xfSamples[gAutoNavigationIdx];
+    DBG("sampleData: " << sampleData[gAutoNavigationIdx]);
+    DBG("xf:\n" << xf);
+
+    gAutoNavigationIdx++;
+    if (gAutoNavigationIdx == xfSamples.size())
+    {
+        setAutoNavState(false);
+        gAutoNavigationIdx = 0;
+        DBG("Done auto navigating over [" << xfSamples.size() << "] projections");
     }
 }
 
@@ -1725,7 +1976,8 @@ int main(int argc, char* argv[])
         //modelFile = "../samples/cube.obj";
         modelFile = "../berlin/berlin.obj";
         //imageFile = "../samples/cube_photo.png";
-        imageFile = "data/inter_03.png";
+        //imageFile = "data/inter_03.png";
+        imageFile = "data/model_image4.png";
         mapFile = "data/berlin_google_map.png";
         markedPtsFile = "data/markedPoints.txt";
     }
@@ -1758,14 +2010,19 @@ int main(int argc, char* argv[])
     initWindow(CV_WINDOW_NAME, winWidth, winHeight, redrawPhoto);
     cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
+    populateXfVector(1);
+
     for (;;)
     {
         updateWindows();
-        int key = cv::waitKey(0);
+        int key = cv::waitKey(33); //33);
         if (key == 27) // ESC key
             break;
 
         handleKeyboard(key);
+
+        if (gAutoNavigation)
+            autoNavigate();
     }
 
     cv::setOpenGlDrawCallback(MAIN_WINDOW_NAME, 0, 0);
