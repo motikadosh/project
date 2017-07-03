@@ -6,7 +6,11 @@
 *.exe
 *.o
 *.so
+
+# Python #
+###################
 *.pyc
+.idea
 
 # Packages #
 ############
@@ -40,3 +44,12 @@ Thumbs.db
 .*.swp
 
 
+# My files / Project specific #
+###############################
+motiCommit
+project
+improc
+mesh_merge/mesh_merge
+mesh_merge/output.obj
+meshNet/sessions_outputs/
+sample_images*/

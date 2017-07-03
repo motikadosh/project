@@ -185,8 +185,8 @@ enum KeysGroup {
 };
 KeysGroup gKeysGroup = KEYS_GROUP_NAV;
 
-int winWidth = 800;
-int winHeight = 600;
+int gWinWidth = 800;
+int gWinHeight = 600;
 float fov = 0.7f;
 float rotStep = DEG_TO_RAD(10);
 float xyzStep = 1;
@@ -331,7 +331,7 @@ void verifySize(const std::string &winName)
     GLint width = V[2], height = V[3];
 
     if (width == 100 && height == 30) // Default window size
-        cv::resizeWindow(winName, winWidth, winHeight);
+        cv::resizeWindow(winName, gWinWidth, gWinHeight);
 }
 
 unsigned int getColorInPoint(const cv::Mat &img, int x, int y)
@@ -817,9 +817,13 @@ void drawVertexes()
 
 void cls()
 {
-    // TODO: Try removing the Alpha argument
+    // Specify clear values for the color buffers
     glClearColor(backgroundColorGL[0], backgroundColorGL[1], backgroundColorGL[2],  1);
+
+    // Specifies the depth value used when the depth buffer is cleared. The initial value is 1.
     glClearDepth(1);
+
+    // Clear buffers to preset values
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
@@ -868,7 +872,7 @@ void redrawVertex(void *userData)
     DBG_T("Entered");
     //DrawData *data = static_cast<DrawData *>(userData);
 
-    // glViewport(0, 0, winWidth, winHeight);
+    // glViewport(0, 0, gWinWidth, gWinHeight);
     //printViewPort();
     verifySize(VERTEX_WINDOW_NAME);
 
@@ -2058,15 +2062,15 @@ int main(int argc, char* argv[])
         for (int i = 1; i < argc; i++)
         {
             if (argv[i][0] == '+')
-                sscanf(argv[i] + 1, "%d,%d", &winWidth, &winHeight);
+                sscanf(argv[i] + 1, "%d,%d", &gWinWidth, &gWinHeight);
         }
     }
 
     loadModel(modelFile);
 
-    initWindow(MAIN_WINDOW_NAME, winWidth, winHeight, redraw);
+    initWindow(MAIN_WINDOW_NAME, gWinWidth, gWinHeight, redraw);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
-    initWindow(VERTEX_WINDOW_NAME, winWidth, winHeight, redrawVertex);
+    initWindow(VERTEX_WINDOW_NAME, gWinWidth, gWinHeight, redrawVertex);
     cv::setMouseCallback(VERTEX_WINDOW_NAME, mouseNavCallbackFunc, NULL);
 
     // Init cvPhoto window
@@ -2074,7 +2078,7 @@ int main(int argc, char* argv[])
     cvMap = cv::imread(mapFile);
     xfMap = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
         trimesh::xform::trans(-themesh->bsphere.center);
-    initWindow(CV_WINDOW_NAME, winWidth, winHeight, redrawPhoto);
+    initWindow(CV_WINDOW_NAME, gWinWidth, gWinHeight, redrawPhoto);
     cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
     populateXfVector(300);
