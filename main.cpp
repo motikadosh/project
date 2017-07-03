@@ -1008,7 +1008,7 @@ void upperView()
 }
 
 // Angles are in radians
-trimesh::XForm<double> getCamRotMatRad(float yaw = 0.0, float pitch = 0.0, float roll = 0.0)
+trimesh::XForm<double> getCamRotMatRad(float yaw, float pitch, float roll)
 {
     float a = roll, b = yaw, c = pitch;
 
@@ -1030,7 +1030,7 @@ trimesh::XForm<double> getCamRotMatRad(float yaw = 0.0, float pitch = 0.0, float
     return rotMat;
 }
 
-trimesh::XForm<double> getCamRotMatDeg(float yaw = 0.0, float pitch = 0.0, float roll = 0.0)
+trimesh::XForm<double> getCamRotMatDeg(float yaw, float pitch, float roll)
 {
     return getCamRotMatRad(DEG_TO_RAD(yaw), DEG_TO_RAD(pitch), DEG_TO_RAD(roll));
 }
@@ -1048,31 +1048,42 @@ std::string getTimeStamp()
 }
 
 #define IMAGE_FORMAT_EXT "png"
+#define IMAGE_OUTPUT_DIR "sample_images/"
 
 // Save the current screen to PNG/PPM file
-std::string takeScreenshot()
+std::string takeScreenshot(const std::string &fileName = std::string())
 {
     DBG_T("Entered");
 
     cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
 
-    // Find first non-used filename
-    std::string fileNamePattern = "sample_images/img_" + getTimeStamp() + "_%d." IMAGE_FORMAT_EXT;
-    int imgNum = 0;
     FILE *f;
-    char fileName[1024];
-
-    while (1)
+    std::string filePath;
+    if (fileName.empty())
     {
-        sprintf(fileName, fileNamePattern.c_str(), imgNum++);
-        f = fopen(fileName, "rb");
-        if (!f)
+        std::string fileNamePattern = IMAGE_OUTPUT_DIR "img_" + getTimeStamp() + "_%d." IMAGE_FORMAT_EXT;
+
+        // Find first non-used filePath
+        char checkedFilePath[1024];
+        int imgNum = 0;
+        while (1)
         {
-            std::cout << "Saving image " << fileName << std::endl;
-            break;
+            sprintf(checkedFilePath, fileNamePattern.c_str(), imgNum++);
+            f = fopen(checkedFilePath, "rb");
+            if (!f) // Found non used file name
+            {
+                filePath = checkedFilePath;
+                break;
+            }
+
+            fclose(f);
         }
-        fclose(f);
     }
+    else
+    {
+        filePath = IMAGE_OUTPUT_DIR + fileName + "." IMAGE_FORMAT_EXT;
+    }
+    DBG_T("Saving image " << filePath);
 
     // Read pixels
     GLint V[4];
@@ -1095,10 +1106,10 @@ std::string takeScreenshot()
     if (std::string(IMAGE_FORMAT_EXT) == "ppm")
     {
         // Write out PPM file
-        f = fopen(fileName, "wb");
+        f = fopen(filePath.c_str(), "wb");
         if (!f)
         {
-            std::cout << "Failed saving file " << fileName << std::cout;
+            std::cout << "Failed saving file " << filePath << std::cout;
             return std::string();
         }
 
@@ -1111,9 +1122,9 @@ std::string takeScreenshot()
         // The following link discusses this conversion-
         // http://stackoverflow.com/questions/9097756/converting-data-from-glreadpixels-to-opencvmat
         cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
-        if (!cv::imwrite(fileName, img))
+        if (!cv::imwrite(filePath, img))
         {
-            std::cout << "Failed saving file " << fileName << std::cout;
+            std::cout << "Failed saving file " << filePath << std::cout;
             return std::string();
         }
 
@@ -1124,8 +1135,8 @@ std::string takeScreenshot()
         //cv::waitKey(0);
     }
 
-    DBG_T("Done. fileName: " << fileName);
-    return fileName;
+    DBG_T("Done. filePath: " << filePath);
+    return filePath;
 }
 
 void printMatDetailed(const std::string &name, const cv::Mat &mat)
@@ -1625,6 +1636,23 @@ void handleNavKeyboard(int key)
         setAutoNavState(!gAutoNavigation);
         break;
 
+    case 'y':
+        {
+            std::cout << "Enter Yaw in degrees: ";
+            float yaw = 0;
+            std::cin >> yaw;
+            xf = getCamRotMatDeg(yaw, 0.0, 0.0) * xf;
+        }
+        break;
+    case 'p':
+        {
+            std::cout << "Enter Pitch in degrees: ";
+            float pitch = 0;
+            std::cin >> pitch;
+            xf = getCamRotMatDeg(0.0, pitch, 0.0) * xf;
+        }
+        break;
+
     case '+':
         xyzStep *= 2;
         DBG("Increased xyzStep to " << xyzStep);
@@ -1843,8 +1871,45 @@ void handleKeyboard(int key)
     }
 }
 
+struct SamplePose {
+    SamplePose(float x, float y, float z, float yaw, float pitch, float roll) :
+        x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
+
+    std::string print() const
+    {
+        std::stringstream ss;
+        ss << std::setprecision(17) << "(x,y,z,yaw,pitch,roll)=(" << x << ", " << y << ", " << z << ", "
+            << yaw << ", " << pitch << ", " << roll << ")";
+        return ss.str();
+    }
+
+    bool write(const std::string &filePath)
+    {
+        std::ofstream f(filePath);
+        f << print();
+        f.close();
+        return f.good();
+    }
+
+    // Members
+    float x;
+    float y;
+    float z;
+
+    // Angles should be in degrees
+    float yaw;
+    float pitch;
+    float roll;
+};
+
+static inline std::ostream& operator<<(std::ostream &out, const SamplePose &pose)
+{
+    out << pose.print();
+    return out;
+}
+
 std::vector<trimesh::xform> xfSamples;
-std::vector<std::string> sampleData;
+std::vector<SamplePose> samplesData;
 void populateXfVector(unsigned xyPositionsNumber)
 {
     std::random_device rd;  //Will be used to obtain a seed for the random number engine
@@ -1856,7 +1921,7 @@ void populateXfVector(unsigned xyPositionsNumber)
     // Make the radius a bit bigger so we would catch the model from also "outside"
     // This should probably be a function of the max height and the FOV or a const.
     // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
-    rad *= 5;
+    rad *= 3;
 
     std::uniform_real_distribution<> disX(-rad, rad);
     std::uniform_real_distribution<> disY(-rad, rad);
@@ -1869,38 +1934,38 @@ void populateXfVector(unsigned xyPositionsNumber)
         // Each call to dis(gen) generates a new random double
         float x = disX(gen);
         float y = disY(gen);
-        DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
+        float z = groundZ;
+        //DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
 
         // TODO: Remove
-        x = 0; y = 8;
+        //x = 0; y = 8;
 
         // Determine the x,y position.
         trimesh::xform sampleXf = trimesh::xform::trans(x, y, 0) *
-            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], -groundZ);
-        DBG("sampleXf:\n" << sampleXf);
+            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], -z);
+        //DBG("sampleXf:\n" << sampleXf);
 
         // Base rotation so we will be looking horizontally
         sampleXf = getCamRotMatDeg(0.0, -90, 0.0) * sampleXf;
 
         // TODO: Should add height (z-axis) position. Probably should sample some height randomize also.
 
+        float rollDeg = 0; // Currently no roll is added
         for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
         {
             trimesh::xform rotatedYawXf = getCamRotMatDeg(yawDeg, 0.0, 0.0);
-            DBG("rotatedYawXf:\n" << rotatedYawXf);
+            //DBG("rotatedYawXf:\n" << rotatedYawXf);
 
             // Remember that negative pitch values are UP
-            for (float pitchDeg = -30;  pitchDeg <= 5; pitchDeg += 5)
+            for (float pitchDeg = -30;  pitchDeg <= 0; pitchDeg += 5)
             {
                 trimesh::xform rotatedPitchXf = getCamRotMatDeg(0.0, pitchDeg, 0.0);
-                DBG("rotatedPitchXf:\n" << rotatedPitchXf);
+                //DBG("rotatedPitchXf:\n" << rotatedPitchXf);
 
                 trimesh::xform rotatedXf =  rotatedYawXf * rotatedPitchXf * sampleXf;
                 xfSamples.push_back(rotatedXf);
 
-                std::stringstream ss;
-                ss << "(x,y,yaw,pitch)=(" << x << ", " << y << ", " << yawDeg << ", " << pitchDeg << ")";
-                sampleData.push_back(ss.str());
+                samplesData.push_back(SamplePose(x, y, z, yawDeg, pitchDeg, rollDeg));
 
                 //DBG("yawDeg: " << yawDeg << ", pitchDeg: " << pitchDeg << ", after rotation xf:\n" << rotatedXf);
                 //std::cin.get();
@@ -1935,26 +2000,28 @@ std::string getFilePathNoExt(const std::string &filePath)
 
 void autoNavigate()
 {
-    // Take screenshot of current pose and save the XF file in identical fileName
+    // Take screen-shot of current pose and save the XF file in identical fileName
     // Skip 1st entry here since it is the pose before starting autoNavigation
     // FIXME: The last image will not be taken. Probably not worth fixing.
     if (gAutoNavigationIdx)
     {
-        std::string imageFilePath = takeScreenshot();
-        std::string xfFilePath = getFilePathNoExt(imageFilePath) + ".xf";
-        xf.write(xfFilePath);
+        std::string sampleFileName = "pose_" + std::to_string(gAutoNavigationIdx - 1);
+
+        std::string imageFilePath = takeScreenshot(sampleFileName);
+        xf.write(getFilePathNoExt(imageFilePath) + ".xf");
+        samplesData[gAutoNavigationIdx - 1].write(getFilePathNoExt(imageFilePath) + ".txt");
 
         // Sanity
         if (xf != xfSamples[gAutoNavigationIdx - 1])
         {
-            throw std::runtime_error("Somhow the XF was modified before we returned here. This might suggest the "
+            throw std::runtime_error("Somehow the XF was modified before we returned here. This might suggest the "
                 "rendered image is not we think");
         }
     }
 
     xf = xfSamples[gAutoNavigationIdx];
-    DBG("sampleData: " << sampleData[gAutoNavigationIdx]);
-    DBG("xf:\n" << xf);
+    DBG("samplesData: " << samplesData[gAutoNavigationIdx]);
+    //DBG("xf:\n" << xf);
 
     gAutoNavigationIdx++;
     if (gAutoNavigationIdx == xfSamples.size())
@@ -2010,12 +2077,12 @@ int main(int argc, char* argv[])
     initWindow(CV_WINDOW_NAME, winWidth, winHeight, redrawPhoto);
     cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
-    populateXfVector(1);
+    populateXfVector(300);
 
     for (;;)
     {
         updateWindows();
-        int key = cv::waitKey(33); //33);
+        int key = cv::waitKey(10); //33);
         if (key == 27) // ESC key
             break;
 
