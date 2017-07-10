@@ -13,7 +13,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 
 IMAGE_SIZE = (100, 75)
-IMAGE_MINIAMAL_CONTENT = 0.1  # Ignore images with less than this percent of pixels
+IMAGE_MINIAMAL_CONTENT = 0.0  # Ignore images with less than this percent of pixels. 0 - skip this check
 
 
 def save_data_pkl(file_path, x_train, x_test,  y_train, y_test, file_urls_train, file_urls_test):
@@ -145,10 +145,13 @@ def load_data(data_dir, part_of_data=1.0, shuffle=True, pkl_file_path=None, imag
         if cnt % 100 == 0:
             print("Loaded " + str(cnt) + "/" + str(len(image_files)) + " images")
 
-        # Ignore images with less than IMAGE_MINIAMAL_CONTENT percent of pixels
-        number_of_pixels_with_data = (x[cnt] != 0).sum()
-        data_percent_from_image = number_of_pixels_with_data / IMAGE_SIZE[0] * IMAGE_SIZE[1]
-        if data_percent_from_image >= IMAGE_MINIAMAL_CONTENT:
+        if (IMAGE_MINIAMAL_CONTENT > 0.0)
+            # Ignore images with less than IMAGE_MINIAMAL_CONTENT percent of pixels
+            number_of_pixels_with_data = (x[cnt] != 0).sum()
+            data_percent_from_image = number_of_pixels_with_data / IMAGE_SIZE[0] * IMAGE_SIZE[1]
+            if data_percent_from_image >= IMAGE_MINIAMAL_CONTENT:
+                cnt += 1
+        else
             cnt += 1
 
     # visualize.show_data(x)

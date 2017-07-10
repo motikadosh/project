@@ -1,15 +1,18 @@
 // http://docs.opencv.org/trunk/d2/d3c/group__core__opengl.html
 
-#include <iostream>
-#include <memory>
-#include <limits>
-#include <set>
 #include <string>
 #include <vector>
-#include <fstream>
+#include <set>
 #include <iostream>
+#include <sstream>
+#include <fstream>
+#include <memory>
 #include <algorithm>
+#include <limits>
 #include <random>
+#include <cstdio>
+#include <iomanip>
+#include <sys/stat.h>
 
 #define FS_DELIMITER_LINUX "/"
 #define FS_DELIMITER_WINDOWS "\\"
@@ -218,6 +221,72 @@ int marksRadius = 4;
 bool gAutoNavigation = false;
 unsigned gAutoNavigationIdx = 0;
 
+struct OrthoProjection {
+    float left;
+    float right;
+    float bottom;
+    float top;
+    float neardist;
+    float fardist;
+
+    OrthoProjection() : left(0.0f), right(0.0f), bottom(0.0f), top(0.0f), neardist(0.0f), fardist(0.0f) {}
+    OrthoProjection(float left, float right, float bottom, float top, float neardist, float fardist) : left(left),
+        right(right), bottom(bottom), top(top), neardist(neardist), fardist(fardist) {}
+
+    void set(float left, float right, float bottom, float top, float neardist, float fardist)
+    {
+        left = left;
+        right = right;
+        bottom = bottom;
+        top = top;
+        neardist = neardist;
+        fardist = fardist;
+    }
+
+    std::string print() const
+    {
+        std::stringstream ss;
+        ss << std::setprecision(17) << "(left,right,bottom,top,neardist,fardist)" << SEP <<
+            "(" << left << ", " << right << ", " << bottom << ", " << top << ", " << neardist << ", " << fardist << ")";
+        return ss.str();
+    }
+
+    bool write(const std::string &filePath)
+    {
+        std::ofstream f(filePath);
+        f << print();
+        f.close();
+        return f.good();
+    }
+
+    bool read(const std::string &filePath)
+    {
+        std::ifstream f(filePath);
+        if (!f.is_open())
+        {
+            std::cout << "Unable to open file " << filePath << std::endl;
+            return false;
+        }
+
+        std::string line;
+        std::getline(f, line);
+
+        std::size_t pos = line.find("=");
+        line = line.substr(pos + 1);
+
+        sscanf(line.c_str(), "(%f, %f, %f, %f, %f, %f)", &left, &right, &bottom, &top, &neardist, &fardist);
+
+        f.close();
+        return true;
+    }
+
+private:
+    const std::string SEP = "=";
+};
+OrthoProjection gOrthoProjData(0, 0, 0, 0, 0, 0);
+
+cv::Mat gModelMap;
+
 //
 // Pre-declarations
 //
@@ -226,6 +295,13 @@ void updateWindows();
 //
 // Utilities
 //
+
+static inline std::ostream& operator<<(std::ostream &out, const OrthoProjection &data)
+{
+    out << data.print();
+
+    return out;
+}
 
 template <typename T1, typename T2>
 inline std::ostream& operator<<(std::ostream &out, const std::pair<T1, T2> &pair)
@@ -257,6 +333,45 @@ inline std::ostream& operator<<(std::ostream &out, const std::set<T> &set)
         out << "\b\b";
 
     return out;
+}
+
+// Linux only. Creates a directory if it is not already exists
+void makeDir(const std::string &dirName)
+{
+    struct stat sb;
+    if (!(stat(dirName.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)))
+    {
+        if (mkdir(dirName.c_str(), ACCESSPERMS))
+            throw std::runtime_error("Failed creating directory " + dirName);
+    }
+}
+
+// E.g. input "C:\Dir\File.bat" -> "File.bat".
+// E.g. input "File.bat" -> "File.bat".
+std::string getFileName(const std::string &strPath)
+{
+    size_t found = strPath.find_last_of("/\\");
+    return strPath.substr(found + 1);
+}
+
+std::string getFileNameNoExt(const std::string &strPath)
+{
+    std::string fileName = getFileName(strPath);
+
+    size_t pos = fileName.find_last_of(".");
+    if (pos != std::string::npos)
+        fileName = fileName.substr(0, pos);
+
+    return fileName;
+}
+
+std::string getFilePathNoExt(const std::string &filePath)
+{
+    size_t pos = filePath.find_last_of(".");
+    if (pos == std::string::npos) // No file extension
+        return filePath;
+
+    return filePath.substr(0, pos);
 }
 
 void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp")
@@ -1552,6 +1667,30 @@ void loadModel(const std::string &fileName)
     resetView();
 }
 
+void loadModelMap(const std::string &modelFile)
+{
+    std::string prefix = getFileNameNoExt(modelFile);
+    std::string mapFileName =  prefix + "_map.png";
+
+    gModelMap = cv::imread(mapFileName);
+    if (gModelMap.empty())
+    {
+        std::cout << "Failed loading map " << mapFileName << std::cout;
+        return;
+    }
+    cvtColor(gModelMap, gModelMap, CV_BGR2GRAY); // Perform gray scale conversion
+    gModelMap = gModelMap.setTo(255, gModelMap > 0);
+
+    DBG("Model map loaded. size " << gModelMap.size() << ", channels [" << gModelMap.channels() << "]");
+
+    //imshowAndWait(gModelMap, 0);
+
+    std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
+    gOrthoProjData.read(orthoDataFileName);
+
+    DBG("Model Ortho Projection data " << gOrthoProjData);
+}
+
 void handleMenuKeyboard(int key)
 {
     //DBG("key [" << key << "], char [" << (char)key << "]");
@@ -1920,29 +2059,63 @@ void populateXfVector(unsigned xyPositionsNumber)
     std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
 
     float rad = themesh->bsphere.r;
-    trimesh::vec center = themesh->bsphere.center;
+    //trimesh::vec center = themesh->bsphere.center;
 
     // Make the radius a bit bigger so we would catch the model from also "outside"
     // This should probably be a function of the max height and the FOV or a const.
     // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
-    rad *= 3;
+    rad *= 1.5;
 
     std::uniform_real_distribution<> disX(-rad, rad);
     std::uniform_real_distribution<> disY(-rad, rad);
 
     float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
 
-    for (unsigned xyPos = 0; xyPos < xyPositionsNumber; xyPos++)
+
+    cv::Mat samplesPositionsMap;
+    cvtColor(gModelMap, samplesPositionsMap, CV_GRAY2RGB);
+
+    // Generate xyPositionsNumber random (x,y)
+    std::vector<std::pair<float, float> > xyPairs;
+    while (xyPairs.size() < xyPositionsNumber)
     {
         // Use dis to transform the random unsigned int generated by gen into a double in [1, 2)
         // Each call to dis(gen) generates a new random double
         float x = disX(gen);
         float y = disY(gen);
+
+        int mapX = (x - gOrthoProjData.left) / (gOrthoProjData.right - gOrthoProjData.left) * gModelMap.cols;
+        int mapY = (y - gOrthoProjData.bottom) / (gOrthoProjData.top - gOrthoProjData.bottom) * gModelMap.rows;
+
+        std::stringstream ss;
+        ss << "(" << x << ", " << y << "), (" << mapX << ", " << mapY << ")";
+
+        cv::Scalar color;
+        if (mapX >= 0 && mapX < gModelMap.cols && mapY >= 0 && mapY < gModelMap.rows &&
+            gModelMap.at<char>(mapY, mapX))
+        {
+            DBG("Position- model(x,y), image(x,y): " <<ss.str() << " is not free");
+            color = red;
+        }
+        else
+        {
+            xyPairs.push_back(std::make_pair(x, y));
+            color = green;
+        }
+
+        cv::circle(samplesPositionsMap, cv::Point(mapX, mapY), 3, color, CV_FILLED);
+        //cv::putText(samplesPositionsMap, ss.str(), cv::Point(mapX, mapY), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.5, color);
+    }
+
+    imshowAndWait(samplesPositionsMap, 0);
+
+    DBG("We have [" << xyPairs.size() << "] xy pairs");
+    for (unsigned xyPos = 0; xyPos < xyPositionsNumber; xyPos++)
+    {
+        float x = xyPairs[xyPos].first;
+        float y = xyPairs[xyPos].second;
         float z = groundZ;
         //DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
-
-        // TODO: Remove
-        //x = 0; y = 8;
 
         // Determine the x,y position.
         trimesh::xform sampleXf = trimesh::xform::trans(x, y, 0) *
@@ -1961,7 +2134,7 @@ void populateXfVector(unsigned xyPositionsNumber)
             //DBG("rotatedYawXf:\n" << rotatedYawXf);
 
             // Remember that negative pitch values are UP
-            for (float pitchDeg = -30;  pitchDeg <= 0; pitchDeg += 5)
+            for (float pitchDeg = 0;  pitchDeg >= -30; pitchDeg -= 5)
             {
                 trimesh::xform rotatedPitchXf = getCamRotMatDeg(0.0, pitchDeg, 0.0);
                 //DBG("rotatedPitchXf:\n" << rotatedPitchXf);
@@ -1993,13 +2166,64 @@ std::string projectionMatToStr(const trimesh::xform &xf)
     return ss.str();
 }
 
-std::string getFilePathNoExt(const std::string &filePath)
+cv::Mat getCvMatFromScreen()
 {
-    size_t pos = filePath.find_last_of(".");
-    if (pos == std::string::npos) // No file extension
-        return filePath;
+    cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
 
-    return filePath.substr(0, pos);
+    // Read pixels
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLint width = V[2], height = V[3];
+    std::unique_ptr<char> buf = std::unique_ptr<char>(new char[width * height * 3]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    GLenum format = GL_BGR;
+    glReadPixels(V[0], V[1], width, height, format, GL_UNSIGNED_BYTE, buf.get());
+
+    // Flip top-to-bottom
+    for (int i = 0; i < height / 2; i++)
+    {
+        char *row1 = buf.get() + 3 * width * i;
+        char *row2 = buf.get() + 3 * width * (height - 1 - i);
+        for (int j = 0; j < 3 * width; j++)
+            std::swap(row1[j], row2[j]);
+    }
+
+    cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
+
+    return img.clone();
+}
+
+// Returns false if image does not have enough data
+//         true also means image was saved successfully
+bool checkAndSaveCurrentSceen(const std::string &filePath, float imageContetThreshold = 0.005)
+{
+    cv::Mat img = getCvMatFromScreen();
+
+    cv::Mat invImg;
+    cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
+    cv::bitwise_not(invImg, invImg);
+
+    // Sanity
+    if (backgroundColorGL != whiteGL)
+        throw std::runtime_error("This function is written for white background - Fix it");
+
+    int nonZeroPixelsCount = cv::countNonZero(invImg);
+    float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
+    if (imageContentPrecentage < imageContetThreshold)
+    {
+        DBG("Skipping. nonZeroPixelsCount [" << nonZeroPixelsCount << "]");
+        DBG("Skipping [" << filePath << "]. Only [" << imageContentPrecentage << "%] is data. Threshold [" <<
+            imageContetThreshold << "]");
+        return false;
+    }
+
+    if (!cv::imwrite(filePath, img))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+
+    return true;
 }
 
 void autoNavigate()
@@ -2009,11 +2233,22 @@ void autoNavigate()
     // FIXME: The last image will not be taken. Probably not worth fixing.
     if (gAutoNavigationIdx)
     {
-        std::string sampleFileName = "pose_" + std::to_string(gAutoNavigationIdx - 1);
+        std::stringstream ssDirName;
+        ssDirName << IMAGE_OUTPUT_DIR << samplesData[gAutoNavigationIdx - 1].x << "_" <<
+            samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
+        makeDir(ssDirName.str());
 
-        std::string imageFilePath = takeScreenshot(sampleFileName);
-        xf.write(getFilePathNoExt(imageFilePath) + ".xf");
-        samplesData[gAutoNavigationIdx - 1].write(getFilePathNoExt(imageFilePath) + ".txt");
+        std::stringstream ssNum;
+        ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx - 1;
+        std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
+
+        if (checkAndSaveCurrentSceen(sampleFilePathNoExt + ".png"))
+        {
+            // Image is OK and was saved. Write also image data
+            samplesData[gAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
+
+            xf.write(sampleFilePathNoExt + ".xf");
+        }
 
         // Sanity
         if (xf != xfSamples[gAutoNavigationIdx - 1])
@@ -2036,8 +2271,6 @@ void autoNavigate()
     }
 }
 
-// XXX: Remember-
-//      cv::setOpenGlContext(const string& winname); // Sets the specified window as current OpenGL context
 int main(int argc, char* argv[])
 {
     std::string modelFile, imageFile, mapFile;
@@ -2067,6 +2300,7 @@ int main(int argc, char* argv[])
     }
 
     loadModel(modelFile);
+    loadModelMap(modelFile);
 
     initWindow(MAIN_WINDOW_NAME, gWinWidth, gWinHeight, redraw);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
@@ -2081,7 +2315,8 @@ int main(int argc, char* argv[])
     initWindow(CV_WINDOW_NAME, gWinWidth, gWinHeight, redrawPhoto);
     cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
-    populateXfVector(300);
+    // FIXME: Value should be gFlags
+    populateXfVector(100);
 
     for (;;)
     {

@@ -48,7 +48,7 @@ debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    nb_epoch = 30
+    nb_epoch = 5
 elif debug_level == 1:   # Medium Debug
     part_of_data = 0.1
     nb_epoch = 5
@@ -104,8 +104,12 @@ def main():
         # Saves the model weights after each epoch if the validation loss decreased
         callbacks = meshNet_model.get_checkpoint(sess_info, False, tensor_board=False)
 
+        # class_weight = {0: 20.,
+        #                 1: 20.,
+        #                 2: 1.,
+        #                 3: 1.}
         history = model.fit(x_train, y_train, batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
-                            validation_data=(x_test, y_test), shuffle=True)
+                            validation_data=(x_test, y_test), shuffle=True)  # , class_weight=class_weight)
     else:
         history = None
 
