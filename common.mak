@@ -92,7 +92,7 @@ endif
 C_FLAGS += -DBOOST_ALL_DYN_LINK -DBOOST_LOG_USE_NATIVE_SYSLOG \
            -DEIGEN_MPL2_ONLY -DGLM_FORCE_RADIANS
 
-CXX_FLAGS = $(C_FLAGS) -DUSE_CAFFE -DCPU_ONLY -std=c++11
+CXX_FLAGS = $(C_FLAGS) -std=c++11
 
 L_FLAGS = $(OPENCV_LFLAGS) \
     -lmysqlcppconn \
@@ -107,9 +107,9 @@ L_FLAGS = $(OPENCV_LFLAGS) \
     -lboost_thread \
     -lgtk-x11-2.0 \
     -lgdk-x11-2.0 \
-    -lcaffe \
     -lglog \
     -ltbb \
+    -lgflags \
     -lGL -lGLU \
     -L$(TRIMESH_LIB) -ltrimesh -lgluit -fopenmp
 

@@ -41,10 +41,26 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include <opencv2/calib3d.hpp>
 
-
 #include "TriMesh.h"
 #include "XForm.h"
 #include "GLCamera.h"
+
+// More about gFalgs- https://gflags.github.io/gflags/
+#include <gflags/gflags.h>
+// For old version of gflags
+#ifndef GFLAGS_NAMESPACE
+    #define GFLAGS_NAMESPACE google
+#endif
+
+//
+// gFlags - Configuration
+//
+DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
+DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
+
+DEFINE_int32(samples_num, 100, "Number of (x, y) pairs to sample in auto navigation");
+DEFINE_int32(win_width, 800, "Width of the main window");
+DEFINE_int32(win_height, 600, "Height of the main window");
 
 //
 // Macros
@@ -188,8 +204,6 @@ enum KeysGroup {
 };
 KeysGroup gKeysGroup = KEYS_GROUP_NAV;
 
-int gWinWidth = 800;
-int gWinHeight = 600;
 float fov = 0.7f;
 float rotStep = DEG_TO_RAD(10);
 float xyzStep = 1;
@@ -446,7 +460,7 @@ void verifySize(const std::string &winName)
     GLint width = V[2], height = V[3];
 
     if (width == 100 && height == 30) // Default window size
-        cv::resizeWindow(winName, gWinWidth, gWinHeight);
+        cv::resizeWindow(winName, FLAGS_win_width, FLAGS_win_height);
 }
 
 unsigned int getColorInPoint(const cv::Mat &img, int x, int y)
@@ -987,7 +1001,7 @@ void redrawVertex(void *userData)
     DBG_T("Entered");
     //DrawData *data = static_cast<DrawData *>(userData);
 
-    // glViewport(0, 0, gWinWidth, gWinHeight);
+    // glViewport(0, 0, FLAGS_win_width, FLAGS_win_height);
     //printViewPort();
     verifySize(VERTEX_WINDOW_NAME);
 
@@ -2139,7 +2153,7 @@ void populateXfVector(unsigned xyPositionsNumber)
                 trimesh::xform rotatedPitchXf = getCamRotMatDeg(0.0, pitchDeg, 0.0);
                 //DBG("rotatedPitchXf:\n" << rotatedPitchXf);
 
-                trimesh::xform rotatedXf =  rotatedYawXf * rotatedPitchXf * sampleXf;
+                trimesh::xform rotatedXf = rotatedPitchXf * rotatedYawXf * sampleXf;
                 xfSamples.push_back(rotatedXf);
 
                 samplesData.push_back(SamplePose(x, y, z, yawDeg, pitchDeg, rollDeg));
@@ -2273,50 +2287,47 @@ void autoNavigate()
 
 int main(int argc, char* argv[])
 {
-    std::string modelFile, imageFile, mapFile;
-    if (argc < 2)
+    std::string usage = std::string(argv[0]) + " [model_file] [image_file] [WinSize +#,+#] [flags]";
+
+    GFLAGS_NAMESPACE::SetUsageMessage(usage);
+    GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
+
+    if (argc == 2)
     {
-        std::cout << "Usage: " << argv[0] << " [model_file] [image_file] [WinSize +#,+#]" << std::endl;
-        //modelFile = "../samples/cube.obj";
-        modelFile = "../berlin/berlin.obj";
-        //imageFile = "../samples/cube_photo.png";
-        //imageFile = "data/inter_03.png";
-        imageFile = "data/model_image4.png";
-        mapFile = "data/berlin_google_map.png";
-        markedPtsFile = "data/markedPoints.txt";
+        FLAGS_model = argv[1];
     }
-    else
+    else if (argc > 2)
     {
-        modelFile = argv[1];
-
-        if (argc > 2)
-            imageFile = argv[2];
-
-        for (int i = 1; i < argc; i++)
-        {
-            if (argv[i][0] == '+')
-                sscanf(argv[i] + 1, "%d,%d", &gWinWidth, &gWinHeight);
-        }
+        std::cerr << "Extra arguments" << std::endl;
+        std::cerr << "Usage: " << argv[0] << usage << std::endl;
+        exit(1);
     }
 
-    loadModel(modelFile);
-    loadModelMap(modelFile);
+    //std::string imageFile, mapFile;
+    //imageFile = "../samples/cube_photo.png";
+    //imageFile = "data/inter_03.png";
+    //imageFile = "data/model_image4.png";
+    //mapFile = "data/berlin_google_map.png";
+    //markedPtsFile = "data/markedPoints.txt";
 
-    initWindow(MAIN_WINDOW_NAME, gWinWidth, gWinHeight, redraw);
+    loadModel(FLAGS_model);
+    loadModelMap(FLAGS_model);
+
+    initWindow(MAIN_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redraw);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
-    initWindow(VERTEX_WINDOW_NAME, gWinWidth, gWinHeight, redrawVertex);
-    cv::setMouseCallback(VERTEX_WINDOW_NAME, mouseNavCallbackFunc, NULL);
+    //initWindow(VERTEX_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawVertex);
+    //cv::setMouseCallback(VERTEX_WINDOW_NAME, mouseNavCallbackFunc, NULL);
 
     // Init cvPhoto window
-    cvPhoto = cv::imread(imageFile);
-    cvMap = cv::imread(mapFile);
-    xfMap = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
-        trimesh::xform::trans(-themesh->bsphere.center);
-    initWindow(CV_WINDOW_NAME, gWinWidth, gWinHeight, redrawPhoto);
-    cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
+    //cvPhoto = cv::imread(imageFile);
+    //cvMap = cv::imread(mapFile);
+    //xfMap = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
+      //  trimesh::xform::trans(-themesh->bsphere.center);
+    //initWindow(CV_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawPhoto);
+    //cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
     // FIXME: Value should be gFlags
-    populateXfVector(100);
+    populateXfVector(FLAGS_samples_num);
 
     for (;;)
     {
@@ -2332,8 +2343,8 @@ int main(int argc, char* argv[])
     }
 
     cv::setOpenGlDrawCallback(MAIN_WINDOW_NAME, 0, 0);
-    cv::setOpenGlDrawCallback(VERTEX_WINDOW_NAME, 0, 0);
-    cv::setOpenGlDrawCallback(CV_WINDOW_NAME, 0, 0);
+    //cv::setOpenGlDrawCallback(VERTEX_WINDOW_NAME, 0, 0);
+    //cv::setOpenGlDrawCallback(CV_WINDOW_NAME, 0, 0);
     cv::destroyAllWindows();
 
     return 0;
