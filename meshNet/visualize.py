@@ -15,6 +15,42 @@ import consts
 import utils
 
 
+def multiple_plots(figure_num, nrows, ncols, plot_number):
+    plt.figure(figure_num)
+    plt.subplot(nrows, ncols, plot_number)
+
+
+def plot_hist(x, normed, bins, title='Histogram', ylabel=None, show=True):
+    print ("Plot: " + title)
+
+    if ylabel is None and normed:
+        ylabel = 'Probability'
+
+    plt.title(title)
+    plt.hist(x, normed=normed, bins=bins)
+    plt.ylabel(ylabel)
+    if show:
+        plt.show()
+
+    print ("Done plot_hist: " + title)
+    return plt
+
+
+def plot_line(x, title='Line', ylabel=None, show=True):
+    print ("Plot: " + title)
+
+    if ylabel is None:
+        ylabel = 'Value'
+
+    plt.plot(x)
+    plt.ylabel(ylabel)
+    if show:
+        plt.show()
+
+    print("Done plot_line: " + title)
+    return plt
+
+
 def show_predictions(x, y, prediction, file_urls, scaler, encoder, resize_factor=4, title="show_image"):
     key = None
 
@@ -61,54 +97,62 @@ def show_predictions(x, y, prediction, file_urls, scaler, encoder, resize_factor
         key = cv2.waitKey(0) & 255  # For some reason I sometime get a very large number and not the clean ASCII
 
 
-def show_data(x, scaler=None, offset=0, images_num_per_axis=None, title="show_data"):
+# FIXME: Add border_color instead of bg_color - low priority
+def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_color=(0, 0, 0), write=None):
     key = None
     done = False
-
-    # TODO: Use constants instead of fixed number for dimensions
-    # img_rows, img_cols, img_channels = keras_utils.parse_batch_shape(x)
-    # The problem with this solution is that the batches are usually still in TF style during pre-processing.
 
     img_rows = x.shape[1]
     img_cols = x.shape[2]
     img_channels = x.shape[3]
 
-    if images_num_per_axis is None:
-        images_num_per_axis = 600 // img_rows
+    if v_axis_num is None:
+        v_axis_num = 600 // img_rows
+    if h_axis_num is None:
+        h_axis_num = 800 // img_cols
 
     # (images_num_per_axis-1) is added form grid lines
-    images = np.zeros((img_rows * images_num_per_axis + images_num_per_axis-1,
-                       img_cols * images_num_per_axis + images_num_per_axis-1,
-                       img_channels), np.uint8)
+    images = np.zeros((img_rows * v_axis_num + (v_axis_num - 1) * border_size,
+                       img_cols * h_axis_num + (h_axis_num - 1) * border_size,
+                       3), np.uint8)
 
-    if scaler is not None:
-        scale_img = scaler.scale_.reshape(img_rows, img_cols, img_channels)
-        mean_img = scaler.mean_.reshape(img_rows, img_cols, img_channels)
+    images[:] = bg_color
+
+    if x.dtype == np.float32:
+        mean_img = np.full(x.shape[1:], np.abs(np.min(x)), np.float32)  # Handle e.g. (0, 1) or (-0.5, 0.5)
+        scale_img = np.full(x.shape[1:], 255, np.float32)
     else:
         scale_img = np.full(x.shape[1:], 1, np.float32)
         mean_img = np.zeros(x.shape[1:], np.float32)
 
     while key != 27 and not done:  # 27 is Esc key
-        for row in range(images_num_per_axis):
-            for col in range(images_num_per_axis):
-                cur_idx = offset + row * images_num_per_axis + col
+        for row in range(v_axis_num):
+            for col in range(h_axis_num):
+                cur_idx = offset + row * h_axis_num + col
                 if cur_idx >= x.shape[0]:
                     done = True
                     break
 
-                cur_img = (x[cur_idx, ...] * scale_img + mean_img).astype('uint8')
-                images[row * img_rows + row:row * img_rows + img_rows + row, col * img_cols + col:col * img_cols + img_cols + col, :] = cur_img
+                cur_img = ((x[cur_idx, ...] + mean_img) * scale_img).astype('uint8')
+                if img_channels == 1:
+                    cur_img = cv2.cvtColor(cur_img, cv2.COLOR_GRAY2RGB)
+                images[row * img_rows + row*border_size:row * img_rows + img_rows + row*border_size, col * img_cols + col*border_size:col * img_cols + img_cols + col*border_size, :] = cur_img
 
-        # TODO: Change window title to show current images range
+        current_images = str(offset) + "-" + str(offset + v_axis_num * h_axis_num - 1)
+        title = "show_data_" + current_images
+        cv2.namedWindow(title)
+        cv2.moveWindow(title, 50, 50)
         cv2.imshow(title, images)
-        print("Press Esc to exit or any other key to continue")
+        print("Images: " + current_images + ". Press Esc to exit or any other key to continue")
         key = cv2.waitKey(0) & 0xFF
 
-        offset += images_num_per_axis * images_num_per_axis
-        images.fill(0)
+        if write:
+            image_path = os.path.join(write, title + ".png")
+            cv2.imwrite(image_path, images)
 
-        # TODO: Close window automatically when done
-        # cv2.destroyWindow(title)
+        offset += v_axis_num * h_axis_num
+        images[:] = bg_color
+        cv2.destroyWindow(title)
 
 
 def visualize_history(history, sess_info):

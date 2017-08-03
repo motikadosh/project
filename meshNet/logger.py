@@ -1,6 +1,9 @@
 import os
 import sys
 
+# TODO: Add timestamp to log prints
+# import time
+
 import utils
 import consts
 

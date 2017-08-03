@@ -49,22 +49,10 @@ def load_pickle(pickle_full_path):
     with open(pickle_full_path) as f:
         print("Loading history from pickle [" + pickle_full_path + "]")
         data = pickle.load(f)
-        file_urls_train = data[0]
-        labels_train = data[1]
-        file_urls_validation = data[2]
-        labels_validation = data[3]
-        file_urls_test = data[4]
-        labels_test = data[5]
-        if len(data) > 6:
-            extra_data = data[6]
-            return file_urls_train, labels_train, file_urls_validation, labels_validation, file_urls_test,\
-                labels_test, extra_data
-        else:
-            return file_urls_train, labels_train, file_urls_validation, labels_validation, file_urls_test, labels_test
+        return data
 
 
-def save_pickle(sess_info, file_urls_train, labels_train, file_urls_validation, labels_validation, file_urls_test,
-                labels_test, extra_data=None):
+def save_pickle(sess_info, data):
     pickle_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'pickle')
     mkdirs(pickle_dir)
 
@@ -73,11 +61,6 @@ def save_pickle(sess_info, file_urls_train, labels_train, file_urls_validation, 
 
     with open(pickle_full_path, "wb") as f:
         print("Saving history to pickle")
-        if extra_data is not None:
-            data = [file_urls_train, labels_train, file_urls_validation, labels_validation, file_urls_test, labels_test,
-                    extra_data]
-        else:
-            data = [file_urls_train, labels_train, file_urls_validation, labels_validation, file_urls_test, labels_test]
         pickle.dump(data, f)
 
 

@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <sys/stat.h>
+#include <ctime>
 
 #define FS_DELIMITER_LINUX "/"
 #define FS_DELIMITER_WINDOWS "\\"
@@ -52,15 +53,24 @@
     #define GFLAGS_NAMESPACE google
 #endif
 
+#include <glog/logging.h>
+
 //
 // gFlags - Configuration
 //
 DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
 DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
+DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
 
-DEFINE_int32(samples_num, 100, "Number of (x, y) pairs to sample in auto navigation");
+DEFINE_int32(samples_num, 300, "Number of (x, y) pairs to sample in auto navigation");
+DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
+DEFINE_double(min_edges_threshold, 5, "Minimum number of edges for sample exporting");
+DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage for sample exporting");
+
 DEFINE_int32(win_width, 800, "Width of the main window");
 DEFINE_int32(win_height, 600, "Height of the main window");
+
+DEFINE_bool(debug, false, "Debug mode");
 
 //
 // Macros
@@ -75,14 +85,14 @@ const float PI = 3.14159265358979323846264f;
 #define CV_WINDOW_NAME "cv_win"
 
 #define DBG(params) \
-    std::cout << dbgCount++ << ") " << __FUNCTION__ << ": " << params << std::endl
+    do { \
+        std::cout << dbgCount++ << ") " << __FUNCTION__ << ": " << params << std::endl; \
+        LOG(INFO) << params; \
+    } while (0)
 
-// #define DEBUG
-#ifdef DEBUG
-    #define DBG_T(params) DBG(params)
-#else
-    #define DBG_T(params)
-#endif
+#define DBG_T(params) \
+    if (FLAGS_debug) \
+        DBG(params)
 
 // Keyboard keys
 // Keys list: https://pythonhosted.org/pyglet/api/pyglet.window.key-module.html
@@ -388,6 +398,45 @@ std::string getFilePathNoExt(const std::string &filePath)
     return filePath.substr(0, pos);
 }
 
+// E.g. input "C:\Dir\File.bat" -> "C:\Dir".
+// E.g. input "File.bat" -> "".
+std::string getDirName(const std::string &strPath)
+{
+    std::size_t found = strPath.find_last_of("/\\");
+    return found == std::string::npos ? "" : strPath.substr(0, found);
+}
+
+std::string getRunningDir()
+{
+#define PRC_EXE_PATH_LEN 1024
+    char pBuf[PRC_EXE_PATH_LEN];
+    int len = PRC_EXE_PATH_LEN;
+    bool isSuccess = false;
+
+#if __linux__
+    char szTmp[128];
+    sprintf(szTmp, "/proc/%d/exe", getpid());
+    int bytes = MIN(readlink(szTmp, pBuf, len), len - 1);
+    if(bytes >= 0) // Success
+        isSuccess = true;
+
+    pBuf[bytes] = '\0';
+#elif WIN32
+    int bytes = GetModuleFileName(NULL, pBuf, len);
+    if(bytes) // Success
+        isSuccess = true;
+#endif
+
+    if (!isSuccess)
+    {
+        std::cerr << "Failed getting current running directory";
+        throw std::runtime_error("Failed getting current running directory");
+        return std::string();
+    }
+
+    return getDirName(pBuf);
+}
+
 void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp")
 {
     if (img.empty())
@@ -396,6 +445,8 @@ void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string 
     //cv::namedWindow(winName, cv::WINDOW_AUTOSIZE);
     cv::imshow(winName, img);
     cv::waitKey(waitTime);
+
+    cv::destroyWindow(winName);
 }
 
 void printViewPort()
@@ -1170,18 +1221,16 @@ trimesh::XForm<double> getCamRotMatDeg(float yaw, float pitch, float roll)
 
 std::string getTimeStamp()
 {
-    char date[20];
     time_t t = time(0);
-    struct tm *tm;
+    struct tm *tm = localtime(&t);
 
-    tm = gmtime(&t);
-    strftime(date, sizeof(date), "%Y%m%d-%H:%M", tm);
+    char timeStamp[32];
+    strftime(timeStamp, sizeof(timeStamp), "%Y_%m_%d-%H_%M_%S", tm);
 
-    return date;
+    return timeStamp;
 }
 
 #define IMAGE_FORMAT_EXT "png"
-#define IMAGE_OUTPUT_DIR "sample_images/"
 
 // Save the current screen to PNG/PPM file
 std::string takeScreenshot(const std::string &fileName = std::string())
@@ -1194,7 +1243,8 @@ std::string takeScreenshot(const std::string &fileName = std::string())
     std::string filePath;
     if (fileName.empty())
     {
-        std::string fileNamePattern = IMAGE_OUTPUT_DIR "img_" + getTimeStamp() + "_%d." IMAGE_FORMAT_EXT;
+        std::string fileNamePattern =
+            FLAGS_output_dir + "img_" + getTimeStamp() + "_%d." IMAGE_FORMAT_EXT;
 
         // Find first non-used filePath
         char checkedFilePath[1024];
@@ -1214,7 +1264,7 @@ std::string takeScreenshot(const std::string &fileName = std::string())
     }
     else
     {
-        filePath = IMAGE_OUTPUT_DIR + fileName + "." IMAGE_FORMAT_EXT;
+        filePath = FLAGS_output_dir + fileName + "." IMAGE_FORMAT_EXT;
     }
     DBG_T("Saving image " << filePath);
 
@@ -1300,7 +1350,39 @@ std::vector<cv::Point> projectCvPoints(std::vector<cv::Point3f> pts, const cv::M
     return p2d;
 }
 
-std::vector<int> findEdgesInView(bool bothVertexesInView)
+// TODO: Count Number of points for edge and ingnore very small edges
+std::vector<int> findEdgesInView(const cv::Mat &img)
+{
+    std::set<int> edgesInViewSet;
+
+    for (int y = 0; y < img.rows; y++)
+    {
+        for (int x = 0; x < img.cols; x++)
+        {
+            unsigned int rgbColor = getColorInPoint(img, x, y);
+            if (rgbColor == 0xFFFFFF) // Skip Background - White
+                continue;
+
+            // Sanity - Sometime usually at startup there is garbage data
+            if (rgbColor >= edges.size())
+            {
+                DBG("Garbage data. Ignoring mat");
+                return std::vector<int>();
+            }
+
+            edgesInViewSet.insert(rgbColor);
+        }
+    }
+
+    std::vector<int> edgesInView;
+    for (auto edge : edgesInViewSet)
+        edgesInView.push_back(edge);
+
+    DBG_T("Number of edges in view [" << edgesInView.size() << "]");
+    return edgesInView;
+}
+
+std::vector<int> findEdgesInView(const std::vector<int> &vertexesIdxInView, bool bothVertexesInView)
 {
     std::vector<int> edgesInView;
 
@@ -1338,15 +1420,15 @@ std::vector<int> findEdgesInView(bool bothVertexesInView)
     }
 */
 
-    DBG("Edges in view size: " << edgesInView.size());
+    DBG_T("Edges in view size: " << edgesInView.size());
     return edgesInView;
 }
 
 void drawEdgesInViewAfterProjection()
 {
-    DBG("Entered");
+    DBG_T("Entered");
 
-    std::vector<int> edgesInView = findEdgesInView(true);
+    std::vector<int> edgesInView = findEdgesInView(vertexesIdxInView, true);
     for (int i : edgesInView)
     {
         std::pair<int, int> edge = edges[i];
@@ -1356,7 +1438,7 @@ void drawEdgesInViewAfterProjection()
         cv::line(cvShowPhoto, p2d[0], p2d[1], blue, 2);
     }
 
-    DBG("Done");
+    DBG_T("Done");
 }
 
 void drawVertexesInViewAfterProjection()
@@ -1392,9 +1474,9 @@ void drawVertexesInViewAfterProjectionWithIntrinsicMatrix()
 
 void drawEdgesInViewAfterProjectionWithIntrinsicMatrix()
 {
-    DBG("Entered");
+    DBG_T("Entered");
 
-    std::vector<int> edgesInView = findEdgesInView(true);
+    std::vector<int> edgesInView = findEdgesInView(vertexesIdxInView, true);
     for (int i : edgesInView)
     {
         std::pair<int, int> edge = edges[i];
@@ -1406,7 +1488,7 @@ void drawEdgesInViewAfterProjectionWithIntrinsicMatrix()
         cv::line(cvShowPhoto, projectedLine[0], projectedLine[1], green, 2);
     }
 
-    DBG("Done");
+    DBG_T("Done");
 }
 
 void updateCvWindow()
@@ -2207,28 +2289,42 @@ cv::Mat getCvMatFromScreen()
     return img.clone();
 }
 
-// Returns false if image does not have enough data
+// Returns false if image does not have enough data/edges
 //         true also means image was saved successfully
-bool checkAndSaveCurrentSceen(const std::string &filePath, float imageContetThreshold = 0.005)
+bool checkAndSaveCurrentSceen(const std::string &filePath)
 {
+    DBG_T("Entered");
+
     cv::Mat img = getCvMatFromScreen();
 
-    cv::Mat invImg;
-    cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
-    cv::bitwise_not(invImg, invImg);
+    if (FLAGS_crop_upper_part)
+        img = img(cv::Rect(0, 0, img.cols, std::round(img.rows * FLAGS_crop_upper_part)));
 
-    // Sanity
-    if (backgroundColorGL != whiteGL)
-        throw std::runtime_error("This function is written for white background - Fix it");
-
-    int nonZeroPixelsCount = cv::countNonZero(invImg);
-    float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
-    if (imageContentPrecentage < imageContetThreshold)
+    std::vector<int> edgesInView = findEdgesInView(img);
+    if (edgesInView.size() < FLAGS_min_edges_threshold)
     {
-        DBG("Skipping. nonZeroPixelsCount [" << nonZeroPixelsCount << "]");
-        DBG("Skipping [" << filePath << "]. Only [" << imageContentPrecentage << "%] is data. Threshold [" <<
-            imageContetThreshold << "]");
+        DBG_T("Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]");
         return false;
+    }
+
+    if (FLAGS_min_data_threshold) // This condition is to save the countNonZero() when min_data_threshold is not used
+    {
+        cv::Mat invImg;
+        cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
+        cv::bitwise_not(invImg, invImg);
+
+        // Sanity
+        if (backgroundColorGL != whiteGL)
+            throw std::runtime_error("This function is written for white background - Fix it");
+
+        int nonZeroPixelsCount = cv::countNonZero(invImg);
+        float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
+        if (imageContentPrecentage < FLAGS_min_data_threshold)
+        {
+            DBG_T("Skipping [" << filePath << "]. Pixel count [" << nonZeroPixelsCount << "], Data part [" <<
+                imageContentPrecentage << "/" << FLAGS_min_data_threshold  << "]");
+            return false;
+        }
     }
 
     if (!cv::imwrite(filePath, img))
@@ -2237,18 +2333,23 @@ bool checkAndSaveCurrentSceen(const std::string &filePath, float imageContetThre
         return false;
     }
 
+    DBG_T("Done");
     return true;
 }
 
 void autoNavigate()
 {
+    static int exportsNum = 0;
+    static int skipsNum = 0;
+    DBG_T("Entered");
+
     // Take screen-shot of current pose and save the XF file in identical fileName
     // Skip 1st entry here since it is the pose before starting autoNavigation
     // FIXME: The last image will not be taken. Probably not worth fixing.
     if (gAutoNavigationIdx)
     {
         std::stringstream ssDirName;
-        ssDirName << IMAGE_OUTPUT_DIR << samplesData[gAutoNavigationIdx - 1].x << "_" <<
+        ssDirName << FLAGS_output_dir << samplesData[gAutoNavigationIdx - 1].x << "_" <<
             samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
         makeDir(ssDirName.str());
 
@@ -2262,6 +2363,12 @@ void autoNavigate()
             samplesData[gAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
 
             xf.write(sampleFilePathNoExt + ".xf");
+
+            exportsNum++;
+        }
+        else
+        {
+            skipsNum++;
         }
 
         // Sanity
@@ -2273,16 +2380,50 @@ void autoNavigate()
     }
 
     xf = xfSamples[gAutoNavigationIdx];
-    DBG("samplesData: " << samplesData[gAutoNavigationIdx]);
     //DBG("xf:\n" << xf);
+
+    if (FLAGS_debug || gAutoNavigationIdx % 1000 == 0)
+    {
+        DBG("sample [#" << gAutoNavigationIdx << "/" << samplesData.size() << "], samplesData: " <<
+            samplesData[gAutoNavigationIdx]);
+    }
 
     gAutoNavigationIdx++;
     if (gAutoNavigationIdx == xfSamples.size())
     {
         setAutoNavState(false);
         gAutoNavigationIdx = 0;
-        DBG("Done auto navigating over [" << xfSamples.size() << "] projections");
+        DBG("Done auto navigating over [" << xfSamples.size() << "] projections. exportsNum [" << exportsNum <<
+            "], skipsNum [" << skipsNum << "]");
     }
+
+    DBG_T("Done");
+}
+
+// All outputs are in "sessions_outputs" directory
+void handleOutputDir(const std::string &appName)
+{
+    if (FLAGS_output_dir.empty())
+        FLAGS_output_dir = appName + "_" + getTimeStamp();
+
+    std::string sessionsOutputDir = getRunningDir() + FS_DELIMITER_LINUX + "sessions_outputs" + FS_DELIMITER_LINUX;
+    std::cout << "Creating sessions_outputs directory [" << sessionsOutputDir << "]" << std::endl;
+    makeDir(sessionsOutputDir);
+
+    FLAGS_output_dir = sessionsOutputDir + FLAGS_output_dir + FS_DELIMITER_LINUX;
+    std::cout << "Creating output directory [" << FLAGS_output_dir << "]" << std::endl;
+    makeDir(FLAGS_output_dir);
+}
+
+// Initialize Google's logging library
+void initGoogleLogs(const std::string &appName)
+{
+    google::SetLogDestination(google::INFO, (FLAGS_output_dir + "log_").c_str());
+    google::SetLogDestination(google::WARNING, "");
+    google::SetLogDestination(google::ERROR, "");
+    google::SetLogDestination(google::FATAL, "");
+
+    google::InitGoogleLogging(appName.c_str());
 }
 
 int main(int argc, char* argv[])
@@ -2291,6 +2432,10 @@ int main(int argc, char* argv[])
 
     GFLAGS_NAMESPACE::SetUsageMessage(usage);
     GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
+
+    handleOutputDir(argv[0]);
+    initGoogleLogs(argv[0]);
+    DBG("Current gFlags [" << GFLAGS_NAMESPACE::CommandlineFlagsIntoString() << "]");
 
     if (argc == 2)
     {
@@ -2302,6 +2447,8 @@ int main(int argc, char* argv[])
         std::cerr << "Usage: " << argv[0] << usage << std::endl;
         exit(1);
     }
+
+    DBG("Entered. exe [" << argv[0] << "], model [" << FLAGS_model << "]");
 
     //std::string imageFile, mapFile;
     //imageFile = "../samples/cube_photo.png";
@@ -2332,7 +2479,7 @@ int main(int argc, char* argv[])
     for (;;)
     {
         updateWindows();
-        int key = cv::waitKey(10); //33);
+        int key = cv::waitKey(5); //33);
         if (key == 27) // ESC key
             break;
 
