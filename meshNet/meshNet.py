@@ -32,31 +32,49 @@ import consts
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-weights_filename = "/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_07_10-16_18_06/hdf5/meshNet_weights.e007-vloss0.0540.hdf5"
+data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
+# data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-21_41_07-grid_40/'
+train_dir = os.path.join(data_dir, 'train')
+test_dir = None
+# test_dir = os.path.join(data_dir, 'test')
+
+weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
+
 
 test_only = False
+load_weights = True
 if test_only:
     load_weights = True
-else:
-    load_weights = False
 
 # Training options
 batch_size = 32
-use_xy_loss_weight = True
+save_best_only = True
 
 debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
     nb_epoch = 25
-elif debug_level == 1:   # Medium Debug
+elif debug_level == 1:  # Medium Debug
     part_of_data = 0.3
     nb_epoch = 15
 elif debug_level == 2:  # Full Debug
-    part_of_data = 1.0 / 60
-    nb_epoch = 2
+    part_of_data = 100
+    nb_epoch = 3
 else:
     raise Exception("Invalid debug level " + str(debug_level))
+
+single_spot = False
+if single_spot:
+    import warnings
+    warnings.warn('Running single spot')
+
+    train_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/train/-2.34907_7.04721'
+    test_dir = None
+    test_only = False
+    load_weights = False
+    part_of_data = 1.0
+    nb_epoch = 100
 
 
 def predict(model, x):
@@ -70,12 +88,40 @@ def predict(model, x):
     return predictions
 
 
-def calc_xy_stats(y, y_pred):
-    xy_error = np.linalg.norm(y[:, 0:2] - y_pred[:, 0:2], axis=-1)
-    xy_error_mean = np.mean(xy_error)
-    xy_error_std = np.std(xy_error)
+# This calcs the L2 Loss. Notice the difference from calc_stats - No sqrt() per element
+# def calc_loss(y, y_pred):
+#     l2_loss = np.mean(np.square(y - y_pred))
+#     return l2_loss
 
-    return xy_error, xy_error_mean, xy_error_std
+
+def calc_angle_diff(a, b):
+    # Return a signed difference between two angles
+    # I.e. the minimum distance from src(a) to dst(b) - consider counter-clockwise as positive
+    return (a - b + 180) % 360 - 180
+
+
+def calc_angle_stats(y, y_pred):
+    err = np.linalg.norm(calc_angle_diff(y, y_pred), axis=-1)
+    err_mean = np.mean(err)
+    err_std = np.std(err)
+
+    return err, err_mean, err_std
+
+
+def calc_angle_stats_unnormalized(y, y_pred):
+    err = np.linalg.norm(calc_angle_diff(y*360.0, y_pred*360.0)/360.0, axis=-1)
+    err_mean = np.mean(err)
+    err_std = np.std(err)
+
+    return err, err_mean, err_std
+
+
+def calc_xy_stats(y, y_pred):
+    err = np.linalg.norm(y - y_pred, axis=-1)
+    err_mean = np.mean(err)
+    err_std = np.std(err)
+
+    return err, err_mean, err_std
 
 
 def print_results(y, y_pred, file_urls, xy_error):
@@ -83,6 +129,24 @@ def print_results(y, y_pred, file_urls, xy_error):
         print("Sample #%s. File: %s" % (i, file_urls[i]))
         print ("Ground-Truth: %s, Prediction: %s, xy_error: %s" % (y[i], y_pred[i], xy_error[i]))
         print ("")
+
+
+def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
+    angle_stats_fn = calc_angle_stats_unnormalized
+
+    if not normalized:
+        y = loader.y_inverse_transform(y)
+        y_pred = loader.y_inverse_transform(y_pred)
+        angle_stats_fn = calc_angle_stats
+
+    print("%s errors..." % dataset_name)
+    xy_error, xy_error_mean, xy_error_std = calc_xy_stats(y[:, 0:2], y_pred[:, 0:2])
+    # print_results(y, y_pred, file_urls, xy_error)
+    print("%s xy error. Mean %s, std %s" % (dataset_name, xy_error_mean, xy_error_std))
+    angle_error, angle_error_mean, angle_error_std = angle_stats_fn(y[:, 2:4], y_pred[:, 2:4])
+    print("%s angle error. Mean %s, std %s" % (dataset_name, angle_error_mean, angle_error_std))
+
+    return xy_error, xy_error_mean, xy_error_std, angle_error, angle_error_mean, angle_error_std
 
 
 def detailed_evaluation(model, loader):
@@ -93,53 +157,75 @@ def detailed_evaluation(model, loader):
     print("Predicting test set...")
     y_test_pred = predict(model, loader.x_test)
 
-    # Get Y values de-normalized
-    y_train = loader.y_inverse_transform(loader.y_train)
-    y_train_pred = loader.y_inverse_transform(y_train_pred)
+    # print("Sanity - Should have identical result to the network loss...")
+    # l2_train_loss = calc_loss(loader.y_test, y_test_pred)
+    # print("Train l2 loss", l2_train_loss)
+    # l2_test_loss = calc_loss(loader.y_test, y_test_pred)
+    # print("Test l2 loss", l2_test_loss)
 
-    y_test = loader.y_inverse_transform(loader.y_test)
-    y_test_pred = loader.y_inverse_transform(y_test_pred)
+    # PoseNet Fix
+    y_train_pred = np.concatenate((y_train_pred[4], y_train_pred[5]), axis=-1)
+    y_test_pred = np.concatenate((y_test_pred[4], y_test_pred[5]), axis=-1)
 
-    print("Train errors...")
-    xy_error_train, xy_error_mean_train, xy_error_std_train = calc_xy_stats(y_train, y_train_pred)
-    # print_results(y_train, y_train_pred, loader.file_urls_train, xy_error_train)
-    print("Mean train xy_error: %s" % xy_error_mean_train)
-    print("Standard deviation train xy_error: %s" % xy_error_std_train)
+    xy_error_train, xy_error_mean_train, xy_error_std_train, \
+        angle_error_train, angle_error_mean_train, angle_error_std_train = \
+        calc_stats(loader, loader.y_train, y_train_pred, normalized=False, dataset_name='Train')
 
-    print("Test errors...")
-    xy_error_test, xy_error_mean_test, xy_error_std_test = calc_xy_stats(y_test, y_test_pred)
-    # print_results(y_test, y_test_pred, loader.file_urls_test, xy_error_test)
-    print("Mean test xy_error: %s" % xy_error_mean_test)
-    print("Standard deviation test xy_error: %s" % xy_error_std_test)
+    xy_error_test, xy_error_mean_test, xy_error_std_test, \
+        angle_error_test, angle_error_mean_test, angle_error_std_test = \
+        calc_stats(loader, loader.y_test, y_test_pred, normalized=False, dataset_name='Test')
 
+    plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
+    hist_fname = sess_info.title + '_predictions_err_hist.png'
+    train_2d_hist_fname = sess_info.title + '_predictions_err_2d_hist.png'
+
+    max_xy_error = max(np.max(xy_error_test), np.max(xy_error_train))
+
+    # Plot 2d heatmap histograms of the errors
     visualize.multiple_plots(1, 1, 2, 1)
-    visualize.plot_hist(xy_error_train, False, 50, title='Train-set errors on X-Y (%s-samples)' % len(xy_error_train),
-                        ylabel='Samples', show=False)
+    visualize.plot_2d_hist(xy_error_test, angle_error_test, False, (50, 50), title='Test Err 2D Histogram',
+                           xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=False)
     visualize.multiple_plots(1, 1, 2, 2)
-    plt = visualize.plot_hist(xy_error_test, False, 50, title='Test-set errors on X-Y (%s-samples)' % len(xy_error_test),
-                              ylabel='Samples', show=True)
+    visualize.plot_2d_hist(xy_error_train, angle_error_train, False, (50, 50), title='Train Err 2D Histogram',
+                           xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=True,
+                           save_path=os.path.join(plots_dir, train_2d_hist_fname))
 
-    # Save predictions plots to disk
-    predictions_plot_fname = sess_info.title + '_predictions_hist.png'
-    predictions_plot_full_path = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, predictions_plot_fname)
-    plt.savefig(predictions_plot_full_path)
+    # Plot 1D histograms of the errors
+    visualize.multiple_plots(2, 2, 2, 1)
+    visualize.plot_hist(xy_error_train, False, 50, title='Train XY err(%s-samples)' % len(xy_error_train),
+                        ylabel='Samples', show=False)
+    visualize.multiple_plots(2, 2, 2, 2)
+    visualize.plot_hist(xy_error_test, False, 50, title='Test XY err(%s-samples)' % len(xy_error_test),
+                        ylabel='Samples', show=False)
 
-    utils.save_pickle(sess_info, [y_train, y_train_pred, loader.file_urls_train,
-                                  xy_error_train, xy_error_mean_train, xy_error_std_train,
-                                  y_test, y_test_pred, loader.file_urls_test,
-                                  xy_error_test, xy_error_mean_test, xy_error_std_test])
+    visualize.multiple_plots(2, 2, 2, 3)
+    visualize.plot_hist(angle_error_train, False, 50, title='Train angle err(%s-samples)' %
+                        len(angle_error_train), ylabel='Samples', show=False)
+    visualize.multiple_plots(2, 2, 2, 4)
+    visualize.plot_hist(angle_error_test, False, 50, title='Test angle err(%s-samples)' %
+                        len(angle_error_test), ylabel='Samples', show=True,
+                        save_path=os.path.join(plots_dir, hist_fname))
 
 
 def main():
     logger.Logger(sess_info)
     print("Entered %s" % title)
 
-    loader = meshNet_loader.DataLoader(
-        data_dir='/home/moti/cg/project/sessions_outputs/project_2017_07_30-11_27_19',
-        pkl_cache_file_path='/home/moti/cg/project/meshNet/sessions_outputs/mesh_data.pkl')
-    loader.set_part_of_data(part_of_data)
+    if load_weights:
+        pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
+                                        sess_info.title + '.pkl')
+        loader = meshNet_loader.DataLoader()
+        loader.load_pickle(pickle_full_path)
+    else:
+        loader = meshNet_loader.DataLoader()
+        loader.load(sess_info.title,
+                    train_dir=train_dir,
+                    test_dir=test_dir,
+                    x_range=(0, 1),
+                    directional_gauss_blur=15,
+                    part_of_data=part_of_data)
 
-    # visualize.show_data(loader.x_train)
+    # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 
     print("Getting model...")
     image_shape = loader.x_train.shape[1:]
@@ -147,11 +233,14 @@ def main():
     # print("image_shape: %d " % image_shape)
     # print("nb_outs: %d " % nb_outs)
 
-    if use_xy_loss_weight:
-        params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
-    else:
-        params = {'image_shape': image_shape, 'nb_outs': nb_outs}
-    model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
+    # Custom loss is mandatory to take 360 degrees into consideration
+    # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
+    # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
+    # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
+    # model, model_name = meshNet_model.almost_VGG11_bn(**params)
+    import posenet
+    params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'cyc_nb_outs': 2}
+    model, model_name = posenet.posenet_train(**params)
 
     print("Model name: %s " % model_name)
     print("Model function input arguments:")
@@ -162,22 +251,35 @@ def main():
 
     print("Model params number: %d " % model.count_params())
     print("Model loss type: %s " % model.loss)
-    print("Model optimizer:")
-    # print(model.optimizer.get_config())
     print("")
 
     if not test_only:
         print("Training model...")
         # Saves the model weights after each epoch if the validation loss decreased
-        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, tensor_board=False)
+        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only, tensor_board=False)
 
-        history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
-                            validation_data=(loader.x_test, loader.y_test), shuffle=True)
+        history = model.fit(loader.x_train, [loader.y_train[:, 0:2], loader.y_train[:, 2:4],
+                                             loader.y_train[:, 0:2], loader.y_train[:, 2:4],
+                                             loader.y_train[:, 0:2], loader.y_train[:, 2:4]],
+                            batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
+                            validation_data=(loader.x_test,
+                                             [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
+                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4],
+                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4]]),
+                            shuffle=True)
+        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
+        #                     validation_data = (loader.x_test, loader.y_test), shuffle = True)
     else:
         history = None
 
-    test_score = model.evaluate(loader.x_test, loader.y_test, verbose=0)
+    # TODO: Run test and detailed EVAL on best EPOCH - Minimum val loss
+    test_score = model.evaluate(loader.x_test, [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
+                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4],
+                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4]], batch_size=1, verbose=0)
+    # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=1, verbose=0)
     print('Test score:', test_score)
+
+    loader.save_pickle(sess_info)
 
     if history:
         visualize.visualize_history(history, sess_info)

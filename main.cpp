@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <sys/stat.h>
 #include <ctime>
+#include <map>
 
 #define FS_DELIMITER_LINUX "/"
 #define FS_DELIMITER_WINDOWS "\\"
@@ -62,10 +63,18 @@ DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
 DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
 DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
 
-DEFINE_int32(samples_num, 300, "Number of (x, y) pairs to sample in auto navigation");
+DEFINE_bool(random_sampling, false, "Use random sampling or not");
+DEFINE_int32(samples_num, 300, "Number of (x, y) pts to sample in auto navigation");
+DEFINE_double(test_percent, 0.2, "Test percent");
+DEFINE_int32(grid_row_pts, 20,
+    "Number of (x, y) pts to sample on each grid row in auto navigation, column is induced");
+DEFINE_double(grid_row_pts_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
+
 DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
-DEFINE_double(min_edges_threshold, 5, "Minimum number of edges for sample exporting");
+DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
+DEFINE_int32(min_edges_threshold, 4, "Minimum number of edges for sample exporting");
 DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage for sample exporting");
+DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
 
 DEFINE_int32(win_width, 800, "Width of the main window");
 DEFINE_int32(win_height, 600, "Height of the main window");
@@ -82,12 +91,13 @@ const float PI = 3.14159265358979323846264f;
 
 #define MAIN_WINDOW_NAME "OpenGL"
 #define VERTEX_WINDOW_NAME "vertex_win"
+#define FACES_WINDOW_NAME "faces_win"
 #define CV_WINDOW_NAME "cv_win"
 
 #define DBG(params) \
     do { \
         std::cout << dbgCount++ << ") " << __FUNCTION__ << ": " << params << std::endl; \
-        LOG(INFO) << params; \
+        LOG(INFO) << __FUNCTION__ << ": " << params; \
     } while (0)
 
 #define DBG_T(params) \
@@ -199,7 +209,7 @@ std::vector<const GLfloat *> glColorsVec = {
 // Globals
 //
 GLfloat const *backgroundColorGL = whiteGL;
-GLfloat const *facesColorGL = backgroundColorGL;
+GLfloat const *foregroundColorGL = blackGL;
 const GLfloat *groundColorGL = whiteGL;
 
 trimesh::GLCamera camera;
@@ -241,6 +251,50 @@ std::vector<cv::Point2f> projectedMarks;
 cv::Mat projMat;
 
 int marksRadius = 4;
+
+struct SamplePose {
+    SamplePose(float x, float y, float z, float yaw, float pitch, float roll) :
+        x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
+
+    std::string print() const
+    {
+        std::stringstream ss;
+        ss << std::setprecision(17) << "(x,y,z,yaw,pitch,roll)=(" << x << ", " << y << ", " << z << ", "
+            << yaw << ", " << pitch << ", " << roll << ")";
+        return ss.str();
+    }
+
+    bool write(const std::string &filePath)
+    {
+        std::ofstream f(filePath);
+        f << print();
+        f.close();
+        return f.good();
+    }
+
+    // Members
+    float x;
+    float y;
+    float z;
+
+    // Angles should be in degrees
+    float yaw;
+    float pitch;
+    float roll;
+};
+
+static inline std::ostream& operator<<(std::ostream &out, const SamplePose &pose)
+{
+    out << pose.print();
+    return out;
+}
+
+struct DataSet {
+    std::vector<cv::Point3f> samplePoints;
+    std::vector<trimesh::xform> xfSamples;
+    std::vector<SamplePose> samplesData;
+};
+std::map<std::string, DataSet> gDataSet;
 
 bool gAutoNavigation = false;
 unsigned gAutoNavigationIdx = 0;
@@ -406,7 +460,7 @@ std::string getDirName(const std::string &strPath)
     return found == std::string::npos ? "" : strPath.substr(0, found);
 }
 
-std::string getRunningDir()
+std::string getRunningExeFilePath()
 {
 #define PRC_EXE_PATH_LEN 1024
     char pBuf[PRC_EXE_PATH_LEN];
@@ -434,7 +488,7 @@ std::string getRunningDir()
         return std::string();
     }
 
-    return getDirName(pBuf);
+    return pBuf;
 }
 
 void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp")
@@ -511,7 +565,10 @@ void verifySize(const std::string &winName)
     GLint width = V[2], height = V[3];
 
     if (width == 100 && height == 30) // Default window size
+    {
+        DBG("Window BUG [" << winName << "] has default size. Resizing");
         cv::resizeWindow(winName, FLAGS_win_width, FLAGS_win_height);
+    }
 }
 
 unsigned int getColorInPoint(const cv::Mat &img, int x, int y)
@@ -877,7 +934,7 @@ void drawGround()
     glEnd();
 }
 
-void drawFaces()
+void drawFaces(GLfloat const *facesColor)
 {
     glDisable(GL_CULL_FACE); // Order of vertexes should not determine faces normals (I.e. Draw both sides of face)
 
@@ -885,7 +942,7 @@ void drawFaces()
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(3, GL_FLOAT, 0, &themesh->vertices[0][0]);
 
-    glColor3fv(facesColorGL);
+    glColor3fv(facesColor);
 
     // Draw the mesh, possibly with color and/or lighting
     glDepthFunc(GL_LESS);
@@ -1052,10 +1109,6 @@ void redrawVertex(void *userData)
     DBG_T("Entered");
     //DrawData *data = static_cast<DrawData *>(userData);
 
-    // glViewport(0, 0, FLAGS_win_width, FLAGS_win_height);
-    //printViewPort();
-    verifySize(VERTEX_WINDOW_NAME);
-
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
     cls();
 
@@ -1063,7 +1116,7 @@ void redrawVertex(void *userData)
     glPushMatrix();
     glMultMatrixd((double *)xf);
 
-    drawFaces();
+    drawFaces(backgroundColorGL);
     drawVertexes();
 
     glPopMatrix(); // Don't forget to pop the Matrix
@@ -1078,6 +1131,25 @@ void redrawVertex(void *userData)
     DBG_T("Done");
 }
 
+void redrawFaces(void *userData)
+{
+    DBG_T("Entered");
+    //DrawData *data = static_cast<DrawData *>(userData);
+
+    cls();
+    camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
+
+    // Transform and draw
+    glPushMatrix();
+    glMultMatrixd((double *)xf);
+
+    drawFaces(foregroundColorGL);
+
+    glPopMatrix(); // Don't forget to pop the Matrix
+
+    DBG_T("Done");
+}
+
 void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
 {
     //DBG(edges);
@@ -1088,7 +1160,7 @@ void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
     glPushMatrix();
     glMultMatrixd((double *)xf);
 
-    drawFaces();
+    drawFaces(backgroundColorGL);
     //drawBoundaries();
     drawEdges();
     drawMarkedPoints();
@@ -1350,10 +1422,9 @@ std::vector<cv::Point> projectCvPoints(std::vector<cv::Point3f> pts, const cv::M
     return p2d;
 }
 
-// TODO: Count Number of points for edge and ingnore very small edges
-std::vector<int> findEdgesInView(const cv::Mat &img)
+std::vector<int> findEdgesInView(const cv::Mat &img, unsigned minEdgePixels)
 {
-    std::set<int> edgesInViewSet;
+    std::map<int, int> edgesCountInView;
 
     for (int y = 0; y < img.rows; y++)
     {
@@ -1370,13 +1441,20 @@ std::vector<int> findEdgesInView(const cv::Mat &img)
                 return std::vector<int>();
             }
 
-            edgesInViewSet.insert(rgbColor);
+            std::map<int, int>::iterator it = edgesCountInView.find(rgbColor);
+            if (it == edgesCountInView.end())
+                edgesCountInView[rgbColor] = 1;
+            else
+                it->second++;
         }
     }
 
     std::vector<int> edgesInView;
-    for (auto edge : edgesInViewSet)
-        edgesInView.push_back(edge);
+    for (auto edge : edgesCountInView)
+    {
+        if (edge.second > (int)minEdgePixels)
+            edgesInView.push_back(edge.first);
+    }
 
     DBG_T("Number of edges in view [" << edgesInView.size() << "]");
     return edgesInView;
@@ -1534,8 +1612,9 @@ void updateWindows()
     DBG_T("Entered");
 
     cv::updateWindow(MAIN_WINDOW_NAME);
-    cv::updateWindow(VERTEX_WINDOW_NAME);
-    updateCvWindow();
+    cv::updateWindow(FACES_WINDOW_NAME);
+    //cv::updateWindow(VERTEX_WINDOW_NAME);
+    //updateCvWindow();
 
     DBG_T("Done");
 }
@@ -1798,10 +1877,10 @@ void handleMenuKeyboard(int key)
         DBG("Toggle show map is now: " << showMap);
         break;
 
-    case 'c':
-        std::cout << "Toggle faces-color (black/white)" << std::endl;
-        facesColorGL = facesColorGL == whiteGL ? blackGL : whiteGL;
-        break;
+    //case 'c':
+    //    std::cout << "Toggle faces-color (black/white)" << std::endl;
+    //    facesColorGL = facesColorGL == whiteGL ? blackGL : whiteGL;
+    //    break;
 
     case 'i':
         takeScreenshot();
@@ -2110,118 +2189,44 @@ void handleKeyboard(int key)
     }
 }
 
-struct SamplePose {
-    SamplePose(float x, float y, float z, float yaw, float pitch, float roll) :
-        x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
-
-    std::string print() const
-    {
-        std::stringstream ss;
-        ss << std::setprecision(17) << "(x,y,z,yaw,pitch,roll)=(" << x << ", " << y << ", " << z << ", "
-            << yaw << ", " << pitch << ", " << roll << ")";
-        return ss.str();
-    }
-
-    bool write(const std::string &filePath)
-    {
-        std::ofstream f(filePath);
-        f << print();
-        f.close();
-        return f.good();
-    }
-
-    // Members
-    float x;
-    float y;
-    float z;
-
-    // Angles should be in degrees
-    float yaw;
-    float pitch;
-    float roll;
-};
-
-static inline std::ostream& operator<<(std::ostream &out, const SamplePose &pose)
+void checkPoint(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv::Mat &colorMap,
+    const cv::Scalar &goodColor)
 {
-    out << pose.print();
-    return out;
+    int mapX = (p.x - gOrthoProjData.left) / (gOrthoProjData.right - gOrthoProjData.left) * gModelMap.cols;
+    int mapY = (p.y - gOrthoProjData.bottom) / (gOrthoProjData.top - gOrthoProjData.bottom) * gModelMap.rows;
+    cv::Point mapPoint = cv::Point(mapX, mapY);
+
+    cv::Scalar color;
+    if (mapX >= 0 && mapX < gModelMap.cols && mapY >= 0 && mapY < gModelMap.rows && gModelMap.at<char>(mapY, mapX))
+    {
+        DBG_T("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " is not free");
+        color = red;
+    }
+    else
+    {
+        samplePoints.push_back(p);
+        color = goodColor;
+    }
+
+    cv::circle(colorMap, mapPoint, 3, color, CV_FILLED);
 }
 
-std::vector<trimesh::xform> xfSamples;
-std::vector<SamplePose> samplesData;
-void populateXfVector(unsigned xyPositionsNumber)
+
+void fillEachPointPoses(DataSet &dataSet)
 {
-    std::random_device rd;  //Will be used to obtain a seed for the random number engine
-    std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
-
-    float rad = themesh->bsphere.r;
-    //trimesh::vec center = themesh->bsphere.center;
-
-    // Make the radius a bit bigger so we would catch the model from also "outside"
-    // This should probably be a function of the max height and the FOV or a const.
-    // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
-    rad *= 1.5;
-
-    std::uniform_real_distribution<> disX(-rad, rad);
-    std::uniform_real_distribution<> disY(-rad, rad);
-
-    float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
-
-
-    cv::Mat samplesPositionsMap;
-    cvtColor(gModelMap, samplesPositionsMap, CV_GRAY2RGB);
-
-    // Generate xyPositionsNumber random (x,y)
-    std::vector<std::pair<float, float> > xyPairs;
-    while (xyPairs.size() < xyPositionsNumber)
+    for (const cv::Point3f &p : dataSet.samplePoints)
     {
-        // Use dis to transform the random unsigned int generated by gen into a double in [1, 2)
-        // Each call to dis(gen) generates a new random double
-        float x = disX(gen);
-        float y = disY(gen);
-
-        int mapX = (x - gOrthoProjData.left) / (gOrthoProjData.right - gOrthoProjData.left) * gModelMap.cols;
-        int mapY = (y - gOrthoProjData.bottom) / (gOrthoProjData.top - gOrthoProjData.bottom) * gModelMap.rows;
-
-        std::stringstream ss;
-        ss << "(" << x << ", " << y << "), (" << mapX << ", " << mapY << ")";
-
-        cv::Scalar color;
-        if (mapX >= 0 && mapX < gModelMap.cols && mapY >= 0 && mapY < gModelMap.rows &&
-            gModelMap.at<char>(mapY, mapX))
-        {
-            DBG("Position- model(x,y), image(x,y): " <<ss.str() << " is not free");
-            color = red;
-        }
-        else
-        {
-            xyPairs.push_back(std::make_pair(x, y));
-            color = green;
-        }
-
-        cv::circle(samplesPositionsMap, cv::Point(mapX, mapY), 3, color, CV_FILLED);
-        //cv::putText(samplesPositionsMap, ss.str(), cv::Point(mapX, mapY), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.5, color);
-    }
-
-    imshowAndWait(samplesPositionsMap, 0);
-
-    DBG("We have [" << xyPairs.size() << "] xy pairs");
-    for (unsigned xyPos = 0; xyPos < xyPositionsNumber; xyPos++)
-    {
-        float x = xyPairs[xyPos].first;
-        float y = xyPairs[xyPos].second;
-        float z = groundZ;
         //DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
 
         // Determine the x,y position.
-        trimesh::xform sampleXf = trimesh::xform::trans(x, y, 0) *
-            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], -z);
+        trimesh::xform sampleXf = trimesh::xform::trans(p.x, p.y, 0) *
+            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], 0);
         //DBG("sampleXf:\n" << sampleXf);
 
         // Base rotation so we will be looking horizontally
         sampleXf = getCamRotMatDeg(0.0, -90, 0.0) * sampleXf;
 
-        // TODO: Should add height (z-axis) position. Probably should sample some height randomize also.
+        // TODO: Should add height (z-axis) position
 
         float rollDeg = 0; // Currently no roll is added
         for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
@@ -2236,17 +2241,83 @@ void populateXfVector(unsigned xyPositionsNumber)
                 //DBG("rotatedPitchXf:\n" << rotatedPitchXf);
 
                 trimesh::xform rotatedXf = rotatedPitchXf * rotatedYawXf * sampleXf;
-                xfSamples.push_back(rotatedXf);
+                dataSet.xfSamples.push_back(rotatedXf);
 
-                samplesData.push_back(SamplePose(x, y, z, yawDeg, pitchDeg, rollDeg));
+                dataSet.samplesData.push_back(SamplePose(p.x, p.y, p.z, yawDeg, pitchDeg, rollDeg));
 
                 //DBG("yawDeg: " << yawDeg << ", pitchDeg: " << pitchDeg << ", after rotation xf:\n" << rotatedXf);
                 //std::cin.get();
             }
         }
     }
+}
 
-    DBG("We now have total of [" << xfSamples.size() << "] xf samples");
+void populateXfVector()
+{
+    gDataSet["train"] = DataSet();
+    gDataSet["test"] = DataSet();
+
+    float rad = themesh->bsphere.r;
+    //trimesh::vec center = themesh->bsphere.center;
+
+    // Make the radius a bit bigger so we would catch the model from also "outside"
+    // This should probably be a function of the max height and the FOV or a const.
+    // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
+    rad *= 1.5;
+
+    float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
+
+    cv::Mat samplesPositionsMap;
+    cvtColor(gModelMap, samplesPositionsMap, CV_GRAY2RGB);
+
+    if (FLAGS_random_sampling)
+    {
+        std::random_device rd;  // Will be used to obtain a seed for the random number engine
+        std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+
+        // Use dis to transform the random unsigned int generated by gen into a double in [1, 2)
+        // Each call to dis(gen) generates a new random double
+        std::uniform_real_distribution<> disX(-rad, rad);
+        std::uniform_real_distribution<> disY(-rad, rad);
+
+        // Generate test random points
+        while (gDataSet["test"].samplePoints.size() < FLAGS_samples_num * FLAGS_test_percent)
+        {
+            cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
+            checkPoint(newPoint, gDataSet["test"].samplePoints, samplesPositionsMap, blue);
+        }
+
+        // Generate train random points
+        while (gDataSet["train"].samplePoints.size() < FLAGS_samples_num * (1 - FLAGS_test_percent))
+        {
+            cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
+            checkPoint(newPoint, gDataSet["train"].samplePoints, samplesPositionsMap, green);
+        }
+    }
+    else
+    {
+        float step = rad * 2 / FLAGS_grid_row_pts;
+        DBG("step [" << step << "]");
+
+        for (float x = -rad; x < rad; x += step)
+            for (float y = -rad; y < rad; y += step)
+                checkPoint(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, samplesPositionsMap, green);
+
+        float offset = step * FLAGS_grid_row_pts_test_offset;
+        for (float x = -rad + offset; x < rad - offset; x += step)
+            for (float y = -rad + offset; y < rad - offset; y += step)
+                checkPoint(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, samplesPositionsMap, blue);
+    }
+    imshowAndWait(samplesPositionsMap, 0);
+
+    DBG("training points [" << gDataSet["train"].samplePoints.size() << "], testing points [" <<
+        gDataSet["test"].samplePoints.size() << "]");
+
+    fillEachPointPoses(gDataSet["train"]);
+    fillEachPointPoses(gDataSet["test"]);
+
+    DBG("Training-set size [" << gDataSet["train"].xfSamples.size() << "], Testing-set size [" <<
+        gDataSet["test"].xfSamples.size() << "]");
 }
 
 std::string projectionMatToStr(const trimesh::xform &xf)
@@ -2262,9 +2333,9 @@ std::string projectionMatToStr(const trimesh::xform &xf)
     return ss.str();
 }
 
-cv::Mat getCvMatFromScreen()
+cv::Mat getCvMatFromScreen(const std::string &winName)
 {
-    cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
+    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
 
     // Read pixels
     GLint V[4];
@@ -2289,21 +2360,51 @@ cv::Mat getCvMatFromScreen()
     return img.clone();
 }
 
-// Returns false if image does not have enough data/edges
-//         true also means image was saved successfully
+cv::Mat convertImgToBinary(const cv::Mat &img)
+{
+    cv::Mat binaryImg;
+    cvtColor(img, binaryImg, CV_BGR2GRAY);
+    cv::bitwise_not(binaryImg, binaryImg);
+    binaryImg = binaryImg > 0;
+    return binaryImg;
+}
+
+// Returns false if image does not have enough data/edges or imwrite fails
 bool checkAndSaveCurrentSceen(const std::string &filePath)
 {
     DBG_T("Entered");
 
-    cv::Mat img = getCvMatFromScreen();
+    // Sanity
+    // Notice this should not be taken too lightly, since we color each edge in its index number.
+    // I.e. 1st one is BLACK. Therefore using BLACK background means the 1st edge will be lost.
+    if (backgroundColorGL != whiteGL)
+        throw std::runtime_error("This function is written for white background");
+
+    cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
+    cv::Mat facesImg = getCvMatFromScreen(FACES_WINDOW_NAME);
+
+    // Sanity
+    cv::Size winSize(FLAGS_win_width, FLAGS_win_height);
+    if (img.size() != winSize || facesImg.size() != winSize)
+    {
+        DBG("img Size != winSize [" << img.size() << ", " << winSize << "] OR facesImg Size != winSize [" <<
+            facesImg.size() << ", " << winSize << "]");
+        throw std::runtime_error("Unexpected image size");
+    }
 
     if (FLAGS_crop_upper_part)
-        img = img(cv::Rect(0, 0, img.cols, std::round(img.rows * FLAGS_crop_upper_part)));
+    {
+        cv::Rect upperPart(0, 0, img.cols, std::round(img.rows * FLAGS_crop_upper_part));
+        img = img(upperPart);
+        facesImg = facesImg(upperPart);
+    }
 
-    std::vector<int> edgesInView = findEdgesInView(img);
-    if (edgesInView.size() < FLAGS_min_edges_threshold)
+    std::vector<int> edgesInView = findEdgesInView(img, FLAGS_min_edge_pixels);
+    if ((int)edgesInView.size() < FLAGS_min_edges_threshold)
     {
         DBG_T("Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]");
+
+        //imshowAndWait(img);
         return false;
     }
 
@@ -2312,10 +2413,6 @@ bool checkAndSaveCurrentSceen(const std::string &filePath)
         cv::Mat invImg;
         cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
         cv::bitwise_not(invImg, invImg);
-
-        // Sanity
-        if (backgroundColorGL != whiteGL)
-            throw std::runtime_error("This function is written for white background - Fix it");
 
         int nonZeroPixelsCount = cv::countNonZero(invImg);
         float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
@@ -2327,11 +2424,30 @@ bool checkAndSaveCurrentSceen(const std::string &filePath)
         }
     }
 
-    if (!cv::imwrite(filePath, img))
+    if (!cv::imwrite(filePath + "_edges.png", img))
     {
         std::cout << "Failed saving file " << filePath << std::cout;
         return false;
     }
+
+    if (!cv::imwrite(filePath + "_faces.png", facesImg))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+
+#if 0
+    cv::Mat blurImg = convertImgToBinary(img);
+    cv::GaussianBlur(blurImg, blurImg, cv::Size(FLAGS_kernel_size, FLAGS_kernel_size), 0);
+
+    cv::Mat facesImgBinary = convertImgToBinary(facesImg);
+    cv::bitwise_and(blurImg, facesImgBinary, blurImg);
+    if (!cv::imwrite(filePath + "_blur.png", blurImg))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+#endif
 
     DBG_T("Done");
     return true;
@@ -2341,23 +2457,33 @@ void autoNavigate()
 {
     static int exportsNum = 0;
     static int skipsNum = 0;
+    static bool isTrain = true;
+
     DBG_T("Entered");
 
-    // Take screen-shot of current pose and save the XF file in identical fileName
-    // Skip 1st entry here since it is the pose before starting autoNavigation
-    // FIXME: The last image will not be taken. Probably not worth fixing.
-    if (gAutoNavigationIdx)
+    std::vector<trimesh::xform> &xfSamples = isTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
+    std::vector<SamplePose> &samplesData = isTrain ? gDataSet["train"].samplesData : gDataSet["test"].samplesData;
+
+    if (!gAutoNavigationIdx)
     {
+        makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (isTrain ? "train" : "test"));
+    }
+    else
+    {
+        // Skip 1st entry here since it is the pose before starting autoNavigation
+        // FIXME: The last image will not be taken. Probably not worth fixing.
+
+        // Take screen-shot of current pose and save the XF file in identical fileName
         std::stringstream ssDirName;
-        ssDirName << FLAGS_output_dir << samplesData[gAutoNavigationIdx - 1].x << "_" <<
-            samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
+        ssDirName << FLAGS_output_dir << (isTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
+            samplesData[gAutoNavigationIdx - 1].x << "_" << samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
         makeDir(ssDirName.str());
 
         std::stringstream ssNum;
         ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx - 1;
         std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
 
-        if (checkAndSaveCurrentSceen(sampleFilePathNoExt + ".png"))
+        if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
         {
             // Image is OK and was saved. Write also image data
             samplesData[gAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
@@ -2391,27 +2517,43 @@ void autoNavigate()
     gAutoNavigationIdx++;
     if (gAutoNavigationIdx == xfSamples.size())
     {
-        setAutoNavState(false);
+        DBG("Done auto navigating over [" << (isTrain ? "train" : "test") << "] set. Projections num [" <<
+            xfSamples.size() << "], exportsNum [" << exportsNum << "], skipsNum [" << skipsNum << "]");
+
+        if (isTrain)
+        {
+            isTrain = false;
+        }
+        else // test set is also done
+        {
+            setAutoNavState(false);
+        }
+
         gAutoNavigationIdx = 0;
-        DBG("Done auto navigating over [" << xfSamples.size() << "] projections. exportsNum [" << exportsNum <<
-            "], skipsNum [" << skipsNum << "]");
+        exportsNum = 0;
+        skipsNum = 0;
     }
 
     DBG_T("Done");
 }
 
 // All outputs are in "sessions_outputs" directory
-void handleOutputDir(const std::string &appName)
+void handleOutputDir()
 {
-    if (FLAGS_output_dir.empty())
-        FLAGS_output_dir = appName + "_" + getTimeStamp();
+    std::string exeFilePath = getRunningExeFilePath();
 
-    std::string sessionsOutputDir = getRunningDir() + FS_DELIMITER_LINUX + "sessions_outputs" + FS_DELIMITER_LINUX;
-    std::cout << "Creating sessions_outputs directory [" << sessionsOutputDir << "]" << std::endl;
-    makeDir(sessionsOutputDir);
+    if (FLAGS_output_dir.empty())
+        FLAGS_output_dir = getFileName(exeFilePath) + "_" + getTimeStamp();
+
+    std::string sessionsOutputDir = getDirName(exeFilePath) + FS_DELIMITER_LINUX + "sessions_outputs" +
+        FS_DELIMITER_LINUX;
 
     FLAGS_output_dir = sessionsOutputDir + FLAGS_output_dir + FS_DELIMITER_LINUX;
-    std::cout << "Creating output directory [" << FLAGS_output_dir << "]" << std::endl;
+
+    std::cout << "exeFilePath ["<< exeFilePath << "], sessionsOutputDir [" << sessionsOutputDir <<
+        "], FLAGS_output_dir [" << FLAGS_output_dir << "]\n";
+
+    makeDir(sessionsOutputDir);
     makeDir(FLAGS_output_dir);
 }
 
@@ -2433,10 +2575,8 @@ int main(int argc, char* argv[])
     GFLAGS_NAMESPACE::SetUsageMessage(usage);
     GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
 
-    handleOutputDir(argv[0]);
+    handleOutputDir();
     initGoogleLogs(argv[0]);
-    DBG("Current gFlags [" << GFLAGS_NAMESPACE::CommandlineFlagsIntoString() << "]");
-
     if (argc == 2)
     {
         FLAGS_model = argv[1];
@@ -2448,7 +2588,8 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    DBG("Entered. exe [" << argv[0] << "], model [" << FLAGS_model << "]");
+    DBG_T("Entered. exe [" << argv[0] << "], current gFlags [" << GFLAGS_NAMESPACE::CommandlineFlagsIntoString() <<
+        "]");
 
     //std::string imageFile, mapFile;
     //imageFile = "../samples/cube_photo.png";
@@ -2462,6 +2603,7 @@ int main(int argc, char* argv[])
 
     initWindow(MAIN_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redraw);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
+    initWindow(FACES_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawFaces);
     //initWindow(VERTEX_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawVertex);
     //cv::setMouseCallback(VERTEX_WINDOW_NAME, mouseNavCallbackFunc, NULL);
 
@@ -2473,13 +2615,18 @@ int main(int argc, char* argv[])
     //initWindow(CV_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawPhoto);
     //cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
-    // FIXME: Value should be gFlags
-    populateXfVector(FLAGS_samples_num);
+    populateXfVector();
+
+    updateWindows();
+    verifySize(MAIN_WINDOW_NAME);
+    verifySize(FACES_WINDOW_NAME);
+    //verifySize(VERTEX_WINDOW_NAME);
 
     for (;;)
     {
         updateWindows();
-        int key = cv::waitKey(5); //33);
+
+        int key = cv::waitKey(gAutoNavigation ? 5 : 0); //33);
         if (key == 27) // ESC key
             break;
 
@@ -2490,6 +2637,7 @@ int main(int argc, char* argv[])
     }
 
     cv::setOpenGlDrawCallback(MAIN_WINDOW_NAME, 0, 0);
+    cv::setOpenGlDrawCallback(FACES_WINDOW_NAME, 0, 0);
     //cv::setOpenGlDrawCallback(VERTEX_WINDOW_NAME, 0, 0);
     //cv::setOpenGlDrawCallback(CV_WINDOW_NAME, 0, 0);
     cv::destroyAllWindows();

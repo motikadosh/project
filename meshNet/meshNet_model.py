@@ -2,8 +2,8 @@ import os
 
 import numpy as np
 from keras.engine import Input
-from keras.layers import Conv2D, MaxPooling2D, AveragePooling2D, SeparableConv2D, Lambda, ZeroPadding2D
-from keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, merge
+from keras.layers import Conv2D, MaxPooling2D, AveragePooling2D, SeparableConv2D, Lambda, ZeroPadding2D, UpSampling2D
+from keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, merge, Reshape, Permute, Layer
 from keras.layers.advanced_activations import PReLU
 from keras.models import Sequential, Model
 from keras.optimizers import SGD, adadelta, Adam, RMSprop
@@ -13,7 +13,6 @@ from keras.callbacks import ModelCheckpoint, TensorBoard
 from keras import backend as K
 
 from keras import initializers as keras_initializers
-from keras import backend as keras_backend
 
 from googlenet_custom_layers import PoolHelper, LRN
 
@@ -30,11 +29,11 @@ def load_model_weights(model, weights_full_path):
     model.load_weights(weights_full_path)
 
 
-def get_checkpoint(sess_info, is_classification, tensor_board=False):
+def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_board=False):
     hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
     utils.mkdirs(hdf5_dir)
 
-    if keras_backend.backend() != 'tensorflow':
+    if K.backend() != 'tensorflow':
         tensor_board = False
 
     tensor_board_cp = None
@@ -53,20 +52,295 @@ def get_checkpoint(sess_info, is_classification, tensor_board=False):
     hdf5_fname = sess_info.title + "_weights.e{epoch:03d}-vloss{val_loss:.4f}" + extra_params + ".hdf5"
     hdf5_full_path = os.path.join(hdf5_dir, hdf5_fname)
 
-    model_cp = ModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=True, monitor=monitor)
+    model_cp = ModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only, monitor=monitor)
     if tensor_board:
         return [model_cp, tensor_board_cp]
     else:
         return [model_cp]
 
 
+def angle_difference(x, y):
+    """
+    Calculate minimum difference between two angles.
+    """
+    return 180 - abs(abs(x - y) - 180)
+
+
+# angle_error_regression() Taken from
+# https://github.com/d4nst/RotNet/blob/master/utils.py
+# See also its main website-
+# https://d4nst.github.io/2017/01/12/image-orientation/
+# https://github.com/d4nst/RotNet/blob/master/utils.py
+def angle_error_regression(y_true, y_pred):
+    """
+    Calculate the mean difference between the true angles
+    and the predicted angles. Each angle is represented
+    as a float number between 0 and 1.
+    """
+    return K.mean(angle_difference(y_true * 360, y_pred * 360))
+
+
+def meshNet_loss_OLD(y_true, y_pred):
+    # TODO: Should find best alpha value
+    alpha = 1.0
+
+    # y_true_dbg = y_true
+    # y_pred_dbg = y_pred
+    y_true_dbg = K.print_tensor(y_true, 'y_true')
+    y_pred_dbg = K.print_tensor(y_pred, 'y_pred')
+
+    ret_xy_loss = K.square(y_pred_dbg[:, 0:2] - y_true_dbg[:, 0:2])
+    ret_angle_loss = angle_difference(y_pred_dbg[:, 2:] * 360, y_true_dbg[:, 2:] * 360) / 360.0
+
+    # alpha * K.square(angle_difference(y_pred[:, 2:] * 360, y_true[:, 2:] * 360) / 360.0), axis=-1)
+
+    ret_xy_loss_dbg = K.print_tensor(ret_xy_loss, 'ret_xy_loss')
+    ret_angle_loss_dbg = K.print_tensor(ret_angle_loss, 'ret_angle_loss')
+
+    ret_loss = K.mean(ret_xy_loss_dbg + alpha * ret_angle_loss_dbg, axis=-1)
+    ret_loss_dbg = K.print_tensor(ret_loss, 'ret_loss')
+
+    return ret_loss_dbg
+
+
+# https://stackoverflow.com/questions/37527832/keras-cost-function-for-cyclic-outputs
+# def mean_squared_error(y_true, y_pred):
+#     return K.mean(K.square(y_pred - y_true), axis=-1)
+def cyclic_mean_squared_error(y_true, y_pred):
+    return K.mean(K.minimum(K.square(y_pred - y_true),
+                            K.minimum(K.square(y_pred - y_true + 1), K.square(y_pred - y_true - 1))),
+                  axis=-1)
+
+
 def meshNet_loss(y_true, y_pred):
-    return K.mean(K.square(y_pred[:, 0:2] - y_true[:, 0:2]) + 0.1 * K.square(y_pred[:, 2:] - y_true[:, 2:]), axis=-1)
+    # TODO: Should find best alpha value
+    # PoseNet Suggest alpha= test_xy_mean_error/test_angle_mean_error ~= 5/65
+    alpha = 1.0
+
+    ret_xy_loss = K.square(y_pred[:, 0:2] - y_true[:, 0:2])
+    ret_angle_loss = K.minimum(K.square(y_pred[:, 2:] - y_true[:, 2:]),
+                               K.minimum(K.square(y_pred[:, 2:] - y_true[:, 2:] + 1),
+                               K.square(y_pred[:, 2:] - y_true[:, 2:] - 1)))
+
+    # ret_xy_loss_dbg = K.print_tensor(ret_xy_loss, 'ret_xy_loss')
+    # ret_angle_loss_dbg = K.print_tensor(ret_angle_loss, 'ret_angle_loss')
+    # ret_loss = K.mean(K.concatenate((ret_xy_loss_dbg, alpha * ret_angle_loss_dbg)))
+
+    ret_loss = K.mean(K.concatenate((ret_xy_loss, alpha * ret_angle_loss)))
+    return ret_loss
+
+
+def almost_VGG11_bn(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = almost_VGG11_bn.__name__
+
+    model = Sequential()
+
+    model.add(Conv2D(64, (3, 3), padding='same', input_shape=image_shape))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(128, (3, 3)))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(256, (3, 3)))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(Conv2D(256, (3, 3)))
+    model.add(BatchNormalization())
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Flatten())
+
+    # model.add(Dense(4096))
+    # model.add(PReLU(alpha_initializer=constant_init()))
+    # model.add(Dense(4096))
+    # model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(512))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(512))
+    model.add(PReLU(alpha_initializer=constant_init()))
+
+    model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = Adam()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
+
+
+def almost_VGG11(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = almost_VGG11.__name__
+
+    model = Sequential()
+
+    model.add(Conv2D(64, (3, 3), padding='same', input_shape=image_shape))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(128, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(256, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(256, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(Conv2D(512, (3, 3)))
+    # model.add(Activation('relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Flatten())
+
+    # model.add(Dense(4096))
+    # model.add(PReLU(alpha_initializer=constant_init()))
+    # model.add(Dense(4096))
+    # model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(512))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(512))
+    model.add(PReLU(alpha_initializer=constant_init()))
+
+    model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = Adam()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
+
+
+def reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger.__name__
+
+    model = Sequential()
+
+    model.add(Conv2D(32, (5, 5), padding='same', input_shape=image_shape))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Conv2D(32, (5, 5)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(32, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(256, (3, 3)))
+    model.add(Activation('relu'))
+
+    model.add(Flatten())
+    model.add(Dense(512))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = Adam()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
+
+
+def reg_2_conv_prelu_mp_2_conv_prelu_dense_dense(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = reg_2_conv_prelu_mp_2_conv_prelu_dense_dense.__name__
+
+    model = Sequential()
+
+    model.add(Conv2D(32, (5, 5), padding='same', input_shape=image_shape))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Conv2D(20, (5, 5)))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(20, (3, 3)))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Conv2D(120, (3, 3)))
+    model.add(PReLU(alpha_initializer=constant_init()))
+
+    model.add(Flatten())
+    model.add(Dense(120))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = RMSprop()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
+
+
+def reg_2_conv_relu_mp_2_conv_relu_dense_dense(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = reg_2_conv_relu_mp_2_conv_relu_dense_dense.__name__
+
+    model = Sequential()
+
+    model.add(Conv2D(32, (5, 5), padding='same', input_shape=image_shape))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Conv2D(20, (5, 5)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+
+    model.add(Conv2D(20, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(120, (3, 3)))
+    model.add(Activation('relu'))
+
+    model.add(Flatten())
+    model.add(Dense(120))
+    model.add(PReLU(alpha_initializer=constant_init()))
+    model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = RMSprop()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
 
 
 # FIXME: Add paper reference
-def reg_2_conv_relu_mp_2_conv_relu_dense_dense(image_shape, nb_outs, optimizer=None, loss=None):
-    model_name = reg_2_conv_relu_mp_2_conv_relu_dense_dense.__name__
+def reg_2_conv_relu_mp_2_conv_relu_dense_dense_orig(image_shape, nb_outs, optimizer=None, loss=None):
+    model_name = reg_2_conv_relu_mp_2_conv_relu_dense_dense_orig.__name__
 
     model = Sequential()
 
@@ -86,6 +360,101 @@ def reg_2_conv_relu_mp_2_conv_relu_dense_dense(image_shape, nb_outs, optimizer=N
     model.add(Dense(84))
     model.add(PReLU(alpha_initializer=constant_init()))
     model.add(Dense(nb_outs))
+
+    if optimizer is None:
+        optimizer = RMSprop()
+    if loss is None:
+        loss = "mean_squared_error"
+
+    model.compile(loss=loss, optimizer=optimizer)
+
+    return model, model_name
+
+
+# Based on SegNet Basic Model
+# https://github.com/0bserver07/Keras-SegNet-Basic
+def segNet(input_shape, output_shape, optimizer=None, loss=None):
+    model_name = segNet.__name__
+
+    def create_encoding_layers():
+        kernel = 3
+        filter_size = 64
+        pad = 1
+        pool_size = 2
+        return [
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(filter_size, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+            Activation('relu'),
+            MaxPooling2D(pool_size=(pool_size, pool_size)),
+
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(128, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+            Activation('relu'),
+            MaxPooling2D(pool_size=(pool_size, pool_size)),
+
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(256, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+            Activation('relu'),
+            MaxPooling2D(pool_size=(pool_size, pool_size)),
+
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(512, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+            Activation('relu'),
+        ]
+
+    def create_decoding_layers():
+        kernel = 3
+        filter_size = 64
+        pad = 1
+        pool_size = 2
+        return [
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(512, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+
+            UpSampling2D(size=(pool_size, pool_size)),
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(256, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+
+            UpSampling2D(size=(pool_size, pool_size)),
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(128, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+
+            UpSampling2D(size=(pool_size, pool_size)),
+            ZeroPadding2D(padding=(pad, pad)),
+            Conv2D(filter_size, (kernel, kernel), padding='valid'),
+            BatchNormalization(),
+        ]
+
+    model = Sequential()
+
+    model.add(Layer(input_shape=input_shape))
+
+    model.encoding_layers = create_encoding_layers()
+    for l in model.encoding_layers:
+        model.add(l)
+
+    model.decoding_layers = create_decoding_layers()
+    for l in model.decoding_layers:
+        model.add(l)
+
+    # What conv with (1, 1) does?
+    # model.add(Conv2D(1, (1, 1), padding='valid'))
+
+    model.add(Flatten())
+    model.add(Dense(output_shape[0] * output_shape[1] * output_shape[2]))
+    model.add(PReLU(alpha_initializer=constant_init()))
+
+    model.add(Reshape(output_shape))
+
+    # print(model.layers[-1].input_shape)
+    # print(model.layers[-1].output_shape)
 
     if optimizer is None:
         optimizer = RMSprop()
@@ -417,3 +786,15 @@ def create_googlenet(weights_path=None):
         googlenet.load_weights(weights_path)
 
     return googlenet
+
+
+def main():
+    print("Entered")
+
+    model, model_name = segNet((600, 800, 1), (1024, 1024, 1))
+    print (model_name)
+
+    print("Done")
+
+if __name__ == '__main__':
+    main()

@@ -8,22 +8,164 @@ import cv2
 
 import utils
 import split
-import visualize
-
-from sklearn.preprocessing import MinMaxScaler
 
 # IMAGE_SIZE = (int(800/8), int(600/8))
 IMAGE_SIZE = (int(800/5), int((600/3)/5))
 IMAGE_RANGE = (0, 255)
 
 
-class DataLoader:
-    _IMAGE_MINIAMAL_CONTENT = 0.0  # Ignore images with less than this percent of pixels. 0 - skip this check
+def apply_smoothing(image, kernel_size=7):
+    """
+    kernel_size must be positive and odd
+    """
+    return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
 
-    data_dir = None
+
+def flip_imgs_colors(imgs):
+    white_imgs = np.full_like(imgs, 255)
+    imgs = white_imgs - imgs
+    imgs[imgs > 0] = 255  # Make sure all values are 0/255
+    return imgs
+
+
+def images_preprocess(x, directional_gauss_blur, file_urls, image_size):
+    print("Images pre-process...")
+
+    print("Flipping images colors (White <-> Black)...")
+    x = flip_imgs_colors(x)
+
+    if directional_gauss_blur is not None:
+        print("Applying directional blurring...")
+        for index, file_url in enumerate(file_urls):
+            x[index, :, :, 0] = apply_smoothing(x[index, :, :, 0], directional_gauss_blur)
+            face_image = load_image(file_url[:-len('_edges.png')] + '_faces.png', image_size)
+            face_image = flip_imgs_colors(face_image)
+            x[index, :, :, 0] = cv2.bitwise_and(x[index, :, :, 0], face_image)
+
+            if index % 100 == 0:
+                print("Applied directional blurring to " + str(index) + "/" + str(len(file_urls)) + " images")
+
+    return x
+
+
+def load_cache(fname):
+    if not os.path.exists(fname):
+        print("Did not find cache with file name " + fname)
+        return None
+
+    print("Loading data from pickle [" + fname + "]...")
+    with open(fname) as f:
+        data = pickle.load(f)
+
+    print("Done loading data from pickle [" + fname + "]")
+    return data
+
+
+def save_cache(fname, data):
+    if os.path.exists(fname):
+        print("File already exists [" + fname + "]. Aborting...")
+        return
+
+    print("Saving data to pickle [" + fname + "]...")
+    with open(fname, "wb") as f:
+        pickle.dump(data, f)
+    print("Done saving data to pickle [" + fname + "]")
+
+
+def allocate_res_arrays(img_num, image_size):
+    images = np.empty((img_num, image_size[1], image_size[0], 1), dtype='uint8')
+    # xf_matrices = np.empty((img_num, 16), dtype=np.float32)
+    poses = np.empty((img_num, 6), dtype=np.float32)
+    file_urls = np.empty(img_num, dtype="object")
+    return images, poses, file_urls
+
+
+def load_image(file_url, image_size):
+    img = cv2.imread(file_url, cv2.IMREAD_GRAYSCALE)
+    if img.shape != image_size:
+        # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
+        img = cv2.resize(img, image_size, interpolation=cv2.INTER_AREA)
+
+    return img
+
+
+def load_pose_file(file_url):
+    pose_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.txt'
+    with open(pose_file_url) as f:
+        line = f.readline()
+        _, pose_txt = line.split('=', 1)
+        pose_txt = pose_txt.strip(' \t\n\r)(')
+        pose = pose_txt.split(", ")
+        if len(pose) != 6:
+            raise Exception("Bad pose value in " + pose_file_url)
+
+        pose = np.array([float(i) for i in pose])
+        return pose
+
+
+def load_xf_file(file_url):
+    xf_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.xf'
+    with open(xf_file_url) as f:
+        array = []
+        for line in f:  # read rest of lines
+            array.append([float(x) for x in line.split()])
+        xf = np.array(array)
+        # print(xf)
+        return xf.reshape(-1)
+
+
+def cached_data_load(title, data_dir, image_size, part_of_data, directional_gauss_blur):
+    print("Loading data...")
+
+    # Generate cache name
+    blur_str = "" if directional_gauss_blur is None else "_blur_" + str(directional_gauss_blur)
+    cache_fname = 'cache_{0}_size_{1}_{2}_part_{3}{4}.pkl'.format(title, image_size[0], image_size[1], part_of_data,
+                                                                  blur_str)
+    cache_full_path = os.path.join(data_dir, cache_fname)
+
+    # Try loading the cache, otherwise load the data and create cache
+    data = load_cache(cache_full_path)
+    if data is not None:
+        return data['x'], data['y'], data['file_urls']
+
+    # Get full images list
+    image_files = utils.get_files_with_ext(data_dir, ext_list='_edges.png')
+    print("Found " + str(len(image_files)) + " images in " + data_dir)
+    if len(image_files) == 0:  # Sanity
+        raise Exception("Invalid folder - has 0 image files")
+
+    if part_of_data > 1:  # Handle integers
+        image_files = image_files[:part_of_data]
+    else:  # Handle floats
+        image_files = image_files[:int(len(image_files) * part_of_data)]
+
+    # Memory allocations
+    x, y, file_urls = allocate_res_arrays(len(image_files), image_size)
+
+    # Data loading
+    for cnt, file_url in enumerate(image_files):
+        x[cnt, :, :, 0] = load_image(file_url, image_size)
+        # y[cnt] = load_xf_file(file_url)
+        y[cnt] = load_pose_file(file_url)
+        file_urls[cnt] = file_url
+
+        if cnt % 100 == 0:
+            print("Loaded " + str(cnt) + "/" + str(len(image_files)) + " images")
+
+    # X Pre-Processing
+    x = images_preprocess(x, directional_gauss_blur, file_urls, image_size)
+
+    data = {'x': x, 'y': y, 'file_urls': file_urls}
+    save_cache(cache_full_path, data)
+    print("Done loading data")
+    return x, y, file_urls
+
+
+class DataLoader:
+    train_dir = None
+    test_dir = None
     image_size = None
     part_of_data = None
-    pkl_cache_file_path = None
     shuffle = True
 
     x_train = None
@@ -35,227 +177,201 @@ class DataLoader:
 
     x_range = None
     y_range = None
-    y_min_max_scaler = None
+    y_min_max = None
 
-    def __init__(self, data_dir, image_size=IMAGE_SIZE, x_range=(-0.5, 0.5), y_range=(0, 1), part_of_data=1.0,
-                 pkl_cache_file_path=None):
-        if part_of_data > 1 or part_of_data <= 0:
-            raise Exception("Invalid argument, should be in (0,1]")
+    directional_gauss_blur = None
 
-        self.data_dir = data_dir
+    # TODO: Merge load() and load_pickle() to use same code
+    def load(self, sess_title, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(-0.5, 0.5), y_range=(0, 1),
+             directional_gauss_blur=None, part_of_data=1.0):
+
+        if part_of_data <= 0 or part_of_data > 1 and part_of_data - np.floor(part_of_data) != 0:
+            raise Exception("Invalid argument, part_of_data [%s] should be in (0,1] or integer" % part_of_data)
+
+        self.train_dir = train_dir
+        self.test_dir = test_dir
+
         self.image_size = image_size
         self.x_range = x_range
         self.y_range = y_range
 
         self.part_of_data = part_of_data
-        self.pkl_cache_file_path = pkl_cache_file_path
 
-        # Try loading the cache
-        # If it is not available load the data with default params
-        if not self.load_cache():
-            self.load_data()
+        self.directional_gauss_blur = directional_gauss_blur
 
-        # print("Done DataLoader init. Samples number: %s" % (self.x_train.shape[0] + self.x_test.shape[0]))
+        x_train, y_train, file_urls_train = cached_data_load(sess_title, train_dir, image_size, part_of_data,
+                                                             directional_gauss_blur)
 
-    def save_cache(self):
-        if not self.pkl_cache_file_path:  # Return if None or empty
-            return
+        if test_dir is not None:
+            x_test, y_test, file_urls_test = cached_data_load(sess_title, test_dir, image_size, part_of_data,
+                                                              directional_gauss_blur)
+        else:
+            print("Test dir not supplied. Splitting train data...")
+            x_train, _, x_test, y_train, _, y_test, file_urls_train, _, file_urls_test = \
+                split.split_data(x_train, y_train, 0, 0.2, file_names=file_urls_train)
 
-        if os.path.exists(self.pkl_cache_file_path):
-            print("File already exists [" + self.pkl_cache_file_path + "]. Aborting...")
-            return
+        # Remove Z and Roll columns from Y
+        y_train = np.delete(y_train, [2, 5], 1)
+        y_test = np.delete(y_test, [2, 5], 1)
+        # Find Y min max for matching scaling
+        y = np.concatenate((y_train, y_test))
+        self.y_min_max = (np.min(y, axis=0), np.max(y, axis=0))
 
-        print("Saving data to pickle [" + self.pkl_cache_file_path + "]...")
-        with open(self.pkl_cache_file_path, "wb") as f:
-            pickle.dump(self.__dict__, f)
-        print("Done saving data to pickle [" + self.pkl_cache_file_path + "]")
+        print("Precessing data...")
+        self.x_train, self.y_train, self.file_urls_train = self.process_data(x_train, y_train, file_urls_train)
+        self.x_test, self.y_test, self.file_urls_test = self.process_data(x_test, y_test, file_urls_test)
 
-    def load_cache(self):
-        if not self.pkl_cache_file_path or not os.path.exists(self.pkl_cache_file_path):
-            return False
+        # import visualize
+        # visualize.show_data(x_test, border_size=1, bg_color=(0, 255, 0))
 
-        print("Loading data from pickle [" + self.pkl_cache_file_path + "]...")
-        with open(self.pkl_cache_file_path) as f:
-            tmp_dict = pickle.load(f)
+        print("Done DataLoader init. Total samples number: %s" % (self.x_train.shape[0] + self.x_test.shape[0]))
 
-        self.__dict__.update(tmp_dict)
-        print("Done loading data from pickle [" + self.pkl_cache_file_path + "]")
-        return True
-
-    def load_data(self):
-        print("Loading data...")
-
-        # Get full images list
-        image_files = utils.get_files_with_ext(self.data_dir)
-        print("Found " + str(len(image_files)) + " images in " + self.data_dir)
+    def process_data(self, x, y, file_urls):
+        print("Normalizing data...")
+        x, y = self.normalize_data(x, y, self.x_range, self.y_range, self.y_min_max)
 
         if self.shuffle:
-            np.random.shuffle(image_files)  # Prevent following code getting images from certain type
-        if self.part_of_data < 1.0:
-            image_files = image_files[:int(len(image_files) * self.part_of_data)]
+            x, y, file_urls = self.unison_shuffled_copies(x, y, file_urls)
 
-        # Memory allocations
-        x, y, file_urls = self.allocate_res_arrays(len(image_files))
-
-        # Data loading
-        cnt = 0
-        for file_url in image_files:
-            x[cnt, :, :, 0] = self.load_image(file_url)
-            # y[cnt] = load_xf_file(file_url)
-            y[cnt] = self.load_pose_file(file_url)
-            file_urls[cnt] = file_url
-
-            if cnt % 100 == 0:
-                print("Loaded " + str(cnt) + "/" + str(len(image_files)) + " images")
-
-            if self._IMAGE_MINIAMAL_CONTENT > 0.0:
-                # Ignore images with less than IMAGE_MINIAMAL_CONTENT percent of pixels
-                number_of_pixels_with_data = (x[cnt] != 0).sum()
-                data_percent_from_image = number_of_pixels_with_data / IMAGE_SIZE[0] * IMAGE_SIZE[1]
-                if data_percent_from_image >= self._IMAGE_MINIAMAL_CONTENT:
-                    cnt += 1
-            else:
-                cnt += 1
-
-                # visualize.show_data(x)
-
-        # Clear empty trailing cells
-        x = x[:cnt]
-        y = y[:cnt]
-        file_urls = file_urls[:cnt]
-
-        # Special variables handling
-        y = np.delete(y, [2, 5], 1)  # Remove Z and Roll columns from Y
-        print("Normalizing data...")
-        x, y, self.y_min_max_scaler = self.normalize_data(x, y, self.x_range, self.y_range)
-
-        # Splitting data to train/test
-        print("Splitting data...")
-        self.x_train, _, self.x_test, self.y_train, _, self.y_test, self.file_urls_train, _, self.file_urls_test = \
-            split.split_data(x, y, 0, 0.2, file_names=file_urls)
-
-        self.save_cache()
-        print("Done loading data")
-
-    def allocate_res_arrays(self, img_num):
-        images = np.empty((img_num, self.image_size[1], self.image_size[0], 1), dtype='uint8')
-        # xf_matrices = np.empty((img_num, 16), dtype=np.float32)
-        poses = np.empty((img_num, 6), dtype=np.float32)
-        file_urls = np.empty(img_num, dtype="object")
-        return images, poses, file_urls
-
-    def normalize_data(self, x, y, x_range, y_range):
-        y_min_max_scaler = MinMaxScaler(feature_range=y_range)
-        y = y_min_max_scaler.fit_transform(y)  # Transform y to range in self.y_range
-
-        x = x.astype(np.float32)
-        x = self.x_min_max_scale(x, IMAGE_RANGE, x_range)
-        return x, y, y_min_max_scaler
+        return x, y, file_urls
 
     @staticmethod
-    def x_min_max_scale(x, old_range, new_range):
-        old_span = old_range[1] - old_range[0]
-        new_span = new_range[1] - new_range[0]
+    def normalize_data(x, y, x_range, y_range, y_min_max):
+        if y.shape[1] != 4:  # Sanity
+            raise Exception("Invalid y dims must be 4 - (x, y, yaw, pitch)")
+
+        # (x, y) data
+        for i in xrange(2):
+            y[:, i] = DataLoader.min_max_scale(y[:, i], (y_min_max[0][i], y_min_max[1][i]), y_range)
+
+        # Yaw, Pitch - convert negative angles to 0-360, then take to range [0, 1]
+        y[:, 2:] = ((y[:, 2:] + 360) % 360) / 360.0
+
+        x = x.astype(np.float32)
+        x = DataLoader.min_max_scale(x, IMAGE_RANGE, x_range)
+        return x, y
+
+    @staticmethod
+    def min_max_scale(x, old_range, new_range):
+        old_span = float(old_range[1]) - float(old_range[0])
+        new_span = float(new_range[1]) - float(new_range[0])
 
         if old_span == 0 or new_span == 0:
-            raise Exception("Invalid old/new range")
+            import warnings
+            warnings.warn('old_span == 0 or new_span == 0')
+            # raise Exception("Invalid old/new range")
 
-        new_x = (((x - old_range[0]) * new_span) / old_span) + new_range[0]
+        # This handles degenerate cases (Usually in debug)- E.g. Single (x, y) Many angles
+        if old_span == 0:
+            old_span = old_range[0]
+        if new_span == 0:
+            new_span = new_range[0]
+
+        new_x = (((x - float(old_range[0])) * new_span) / old_span) + float(new_range[0])
         return new_x
 
     def x_inverse_transform(self, x):
-        return self.x_min_max_scale(x.astype(np.float32), self.x_range, IMAGE_RANGE)
+        return self.min_max_scale(x.astype(np.float32), self.x_range, IMAGE_RANGE)
 
     def y_inverse_transform(self, y):
-        if y.ndim == 1:
-            return self.y_min_max_scaler.inverse_transform(y.reshape(1, -1))
-        else:
-            return self.y_min_max_scaler.inverse_transform(y)
+        y_new = np.zeros_like(y)
+        for i in xrange(2):
+            y_new[:, i] = DataLoader.min_max_scale(y[:, i], self.y_range, (self.y_min_max[0][i], self.y_min_max[1][i]))
+
+        y_new[:, 2:] = y[:, 2:] * 360
+        return y_new
 
     @staticmethod
-    def load_xf_file(file_url):
-        xf_file_url = os.path.splitext(file_url)[0] + '.xf'
-        with open(xf_file_url) as f:
-            array = []
-            for line in f:  # read rest of lines
-                array.append([float(x) for x in line.split()])
-            xf = np.array(array)
-            # print(xf)
-            return xf.reshape(-1)
+    def unison_shuffled_copies(x, y, file_urls):
+        p = np.random.permutation(len(x))
+        return x[p], y[p], file_urls[p]
 
-    @staticmethod
-    def load_pose_file(file_url):
-        pose_file_url = os.path.splitext(file_url)[0] + '.txt'
-        with open(pose_file_url) as f:
-            line = f.readline()
-            _, pose_txt = line.split('=', 1)
-            pose_txt = pose_txt.strip(' \t\n\r)(')
-            pose = pose_txt.split(", ")
-            if len(pose) != 6:
-                raise Exception("Bad pose value in " + pose_file_url)
+    def save_pickle(self, sess_info):
+        print("Saving session pickle...")
 
-            pose = np.array([float(i) for i in pose])
-            return pose
+        data = {
+            'sess_title': sess_info.title,
+            'train_dir': self.train_dir,
+            'test_dir': self.test_dir,
+            'image_size': self.image_size,
+            'part_of_data': self.part_of_data,
+            'shuffle': self.shuffle,
 
-    @staticmethod
-    def load_image(file_url):
-        img = cv2.imread(file_url, cv2.IMREAD_GRAYSCALE)
-        if img.shape != IMAGE_SIZE:
-            # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
-            img = cv2.resize(img, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
+            'y_train': self.y_train,
+            'y_test': self.y_test,
+            'file_urls_train': self.file_urls_train,
+            'file_urls_test': self.file_urls_test,
 
-            # Flip images colors (White - Black)
-            white_img = np.full(img.shape, 255, img.dtype)
-            img = white_img - img
+            'x_range': self.x_range,
+            'y_range': self.y_range,
+            'y_min_max': self.y_min_max,
 
-            # Make sure all values are 0/255
-            img[img > 0] = 255
+            'directional_gauss_blur': self.directional_gauss_blur
+        }
 
-        return img
+        utils.save_pickle(sess_info, data)
 
-    @staticmethod
-    def resize_batch(x, new_size):
-        img_num = x.shape[0]
-        new_x = np.empty((img_num, new_size[1], new_size[0], 1), dtype='uint8')
+    def load_pickle(self, pickle_full_path):
+        data = utils.load_pickle(pickle_full_path)
 
-        for i in range(img_num):
-            new_img = cv2.resize(x[i], new_size, interpolation=cv2.INTER_AREA)
-            if new_img.ndim == 2:  # Handle adding the channels axis to a single channel image
-                new_img = np.expand_dims(new_img, 2)
-            new_x[i] = new_img
+        print("session title: %s" % data['sess_title'])
 
-        return new_x
+        self.train_dir = data['train_dir']
+        self.test_dir = data['test_dir']
+        self.image_size = data['image_size']
+        self.part_of_data = data['part_of_data']
+        self.shuffle = data['shuffle']
 
-    def set_part_of_data(self, part_of_data=1.0):
-        if part_of_data > 1 or part_of_data <= 0:
-            raise Exception("Invalid argument, should be in (0,1]")
+        self.y_train = data['y_train']
+        self.y_test = data['y_test']
+        self.file_urls_train = data['file_urls_train']
+        self.file_urls_test = data['file_urls_test']
 
-        if part_of_data < 1:
-            self.x_train = self.x_train[:int(len(self.x_train) * part_of_data)]
-            self.y_train = self.y_train[:int(len(self.y_train) * part_of_data)]
-            self.file_urls_train = self.file_urls_train[:int(len(self.file_urls_train) * part_of_data)]
+        self.x_range = data['x_range']
+        self.y_range = data['y_range']
+        self.y_min_max = data['y_min_max']
 
-            self.x_test = self.x_test[:int(len(self.x_test) * part_of_data)]
-            self.y_test = self.y_test[:int(len(self.y_test) * part_of_data)]
-            self.file_urls_test = self.file_urls_test[:int(len(self.file_urls_test) * part_of_data)]
+        self.directional_gauss_blur = data['directional_gauss_blur']
 
-    def set_image_size(self, image_size):
-        if image_size[0] > self.image_size[0] or image_size[1] > self.image_size[1]:
-            raise Exception(
-                "Setting bigger image than loaded is prohibited. Remove cache and reload data in larger size")
+        print("Loading images...")
 
-        if image_size != self.image_size:
-            self.x_train = self.resize_batch(self.x_train, image_size)
-            self.x_test = self.resize_batch(self.x_test, image_size)
+        def load_image_files(image_files, image_size):
+            images = np.empty((len(image_files), image_size[1], image_size[0], 1), dtype='uint8')
+
+            for cnt, fname in enumerate(image_files):
+                images[cnt, :, :, 0] = load_image(fname, image_size)
+                if cnt % 100 == 0:
+                    print("Loaded " + str(cnt) + "/" + str(len(image_files)) + " images")
+
+            return images
+
+        self.x_train = load_image_files(self.file_urls_train, self.image_size)
+        self.x_test = load_image_files(self.file_urls_test, self.image_size)
+
+        self.x_train = images_preprocess(self.x_train, self.directional_gauss_blur, self.file_urls_train,
+                                         self.image_size)
+        self.x_test = images_preprocess(self.x_test, self.directional_gauss_blur, self.file_urls_test, self.image_size)
+
+        self.x_train = self.x_train.astype(np.float32)
+        self.x_train = DataLoader.min_max_scale(self.x_train, IMAGE_RANGE, self.x_range)
+        self.x_test = self.x_test.astype(np.float32)
+        self.x_test = DataLoader.min_max_scale(self.x_test, IMAGE_RANGE, self.x_range)
 
 
 # For testing purpose
 def main():
-    # print("Loading images and lables")
-    # x_train, x_test, \
-    #     y_train, y_test, \
-    #     file_urls_train, file_urls_test, y_min_max_scaler = load_data(
-    #         '/home/moti/cg/project/sample_images/', part_of_data=0.1, shuffle=False, image_size=(100, 75))
+    print("Loading images and labels")
+
+    data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
+    train_dir = os.path.join(data_dir, 'train')
+    test_dir = os.path.join(data_dir, 'test')
+
+    loader = DataLoader('temp_title',
+                        train_dir=train_dir,
+                        test_dir=test_dir,
+                        x_range=(0, 1), directional_gauss_blur=15, part_of_data=1.0)
+
+    # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 
     # visualize.show_data(x_train, border_size=1, bg_color=(0, 255, 0))
 

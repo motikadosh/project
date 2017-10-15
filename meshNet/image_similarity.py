@@ -13,7 +13,7 @@ import meshNet_loader
 import visualize
 
 
-data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_07_30-11_27_19'
+data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_08_08-13_11_31-500samplesMin5LinesWith50PixUpper0.33'
 
 
 def calc_ssd(img1, img2):
@@ -83,7 +83,7 @@ def show_xy_dist_hist(metric_results, y, loader, precent):
 
 
 def all_to_all(smooth_kernel=None):
-    loader = meshNet_loader.DataLoader(data_dir=data_dir, x_range=(0, 1), part_of_data=1.0/10)
+    loader = meshNet_loader.DataLoader(data_dir=data_dir, x_range=(0, 1), part_of_data=1.0/20)
     # , pkl_cache_file_$path='/home/moti/cg/project/meshNet/sessions_outputs/mesh_data.pkl')
 
     x = np.concatenate((loader.x_train, loader.x_test))
@@ -226,7 +226,7 @@ def main():
     # all_to_all()
     # n_to_all()
 
-    # all_to_all(7)
+    all_to_all(7)
     # n_to_all(7)
 
     #     cv2.ims   how("img2", x[img2_idx])

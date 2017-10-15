@@ -14,13 +14,34 @@ from sklearn.preprocessing import StandardScaler
 import consts
 import utils
 
+USE_OPENCV=False
+
+
+def imshow(win_title, img):
+    if USE_OPENCV:
+        cv2.imshow(win_title, img)
+        key = cv2.waitKey(0) & 0xFF
+        return key
+    else:
+        # rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB
+
+        rgb = np.zeros_like(img)
+        rgb[:, :, 0] = img[:, :, 2]
+        rgb[:, :, 1] = img[:, :, 1]
+        rgb[:, :, 2] = img[:, :, 0]
+
+        plt.title(win_title)
+        plt.imshow(rgb)
+        plt.show()
+        return 27  # Esc - Will show only 1st window
+
 
 def multiple_plots(figure_num, nrows, ncols, plot_number):
     plt.figure(figure_num)
     plt.subplot(nrows, ncols, plot_number)
 
 
-def plot_hist(x, normed, bins, title='Histogram', ylabel=None, show=True):
+def plot_hist(x, normed, bins, title='Histogram', ylabel=None, show=True, save_path=None):
     print ("Plot: " + title)
 
     if ylabel is None and normed:
@@ -29,11 +50,40 @@ def plot_hist(x, normed, bins, title='Histogram', ylabel=None, show=True):
     plt.title(title)
     plt.hist(x, normed=normed, bins=bins)
     plt.ylabel(ylabel)
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
     if show:
         plt.show()
 
     print ("Done plot_hist: " + title)
-    return plt
+
+
+def plot_2d_hist(x, y, normed, bins, title='Histogram', xlabel=None, ylabel=None, xlim=None, ylim=None, show=True,
+                 save_path=None):
+    print ("Plot: " + title)
+
+    heatmap, xedges, yedges = np.histogram2d(x, y, normed=normed, bins=bins)
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+
+    plt.title(title)
+    cax = plt.imshow(heatmap.T, cmap='jet', aspect='auto', extent=extent, origin='lower')
+    plt.colorbar(cax)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    if xlim is not None:
+        plt.xlim(xlim)
+    if ylim is not None:
+        plt.ylim(ylim)
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+    if show:
+        plt.show()
+
+    print ("Done plot_hist: " + title)
 
 
 def plot_line(x, title='Line', ylabel=None, show=True):
@@ -140,11 +190,12 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
 
         current_images = str(offset) + "-" + str(offset + v_axis_num * h_axis_num - 1)
         title = "show_data_" + current_images
-        cv2.namedWindow(title)
-        cv2.moveWindow(title, 50, 50)
-        cv2.imshow(title, images)
+        # cv2.namedWindow(title)
+        # cv2.moveWindow(title, 50, 50)
+        key = imshow(title, images)
         print("Images: " + current_images + ". Press Esc to exit or any other key to continue")
-        key = cv2.waitKey(0) & 0xFF
+
+        # key = cv2.waitKey(0) & 0xFF
 
         if write:
             image_path = os.path.join(write, title + ".png")
@@ -152,12 +203,16 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
 
         offset += v_axis_num * h_axis_num
         images[:] = bg_color
-        cv2.destroyWindow(title)
+        # cv2.destroyWindow(title)
 
 
 def visualize_history(history, sess_info):
     try:
-        target_names = ['training dataset', 'validation dataset']
+        print("History results-")
+        for d in history.history:
+            print("%s - %s" % (d, history.history[d]))
+
+        target_names = ['training-set', 'validation-set']
         fig = plt.figure()
         fig.suptitle(sess_info.title)
 
@@ -169,7 +224,10 @@ def visualize_history(history, sess_info):
         ax.plot(history.epoch, history.history['loss'], 'r', label=target_names[0])
         ax.plot(history.epoch, history.history['val_loss'], 'g', label=target_names[1])
         ax.legend()
-        ax.set_title('Loss')
+        ax.set_ylim(ymin=0, ymax=3*max(history.history['val_loss']))  # Avoid very high values 'loss' might starts with
+        ax.set_title('Loss (train [%.2f, %.2f], val [%.2f, %.2f])' %
+                     (min(history.history['loss']), max(history.history['loss']),
+                      min(history.history['val_loss']), max(history.history['val_loss'])))
 
         if "acc" in history.history.keys():
             ax = fig.add_subplot(122)
