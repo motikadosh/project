@@ -53,3 +53,5 @@ mesh_merge/mesh_merge
 mesh_merge/output.obj
 meshNet/sessions_outputs/
 sample_images*/
+tags
+sessions_outputs
