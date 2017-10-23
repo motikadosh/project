@@ -31,6 +31,19 @@
 #include "TriMesh.h"
 #include "XForm.h"
 
+// More about gFalgs- https://gflags.github.io/gflags/
+#include <gflags/gflags.h>
+// For old version of gflags
+#ifndef GFLAGS_NAMESPACE
+    #define GFLAGS_NAMESPACE google
+#endif
+
+//
+// gFlags - Configuration
+//
+
+DEFINE_int32(grid, 1, "Number of parts per axis");
+
 //
 // Macros
 //
@@ -107,9 +120,7 @@ std::string gModelFilePath;
 int gWinWidth = 800;
 int gWinHeight = 600;
 float fov = 0.7f;
-const unsigned screenDivider = 2;
-std::array<std::array<cv::Mat, screenDivider>, screenDivider> mapImages;
-unsigned gCurrentMap = 0; // Must init to full map to get full model dimensions
+bool gRefresh = true;
 
 std::unique_ptr<trimesh::TriMesh> themesh;
 trimesh::xform xf; // Current location and orientation
@@ -138,11 +149,11 @@ struct OrthoProjection {
         fardist = fardist;
     }
 
-    std::string print() const
+    std::string print(unsigned precision = 17) const
     {
         std::stringstream ss;
-        ss << std::setprecision(17) << "(left,right,bottom,top,neardist,fardist)=(" << left << ", " << right << ", " <<
-            bottom << ", " << top << ", " << neardist << ", " << fardist << ")";
+        ss << std::setprecision(precision) << "(left,right,bottom,top,neardist,fardist)=(" << left << ", " << right <<
+            ", " << bottom << ", " << top << ", " << neardist << ", " << fardist << ")";
         return ss.str();
     }
 
@@ -154,14 +165,18 @@ struct OrthoProjection {
         return f.good();
     }
 };
-OrthoProjection gOrthoProjData(0, 0, 0, 0,0, 0);
+std::vector<OrthoProjection> gOrthoViews;
+unsigned gViewIdx = 0;
+
+cv::Mat gFullMap;
+bool gAutoNav = false;
 
 //
 // Utilities
 //
 static inline std::ostream& operator<<(std::ostream &out, const OrthoProjection &data)
 {
-    out << data.print();
+    out << data.print(6);
 
     return out;
 }
@@ -440,6 +455,8 @@ bool read_depth(int x, int y, trimesh::point &p)
 
 OrthoProjection getFullViewParams()
 {
+    DBG("Entered");
+
     trimesh::point scene_center = xf * themesh->bsphere.center;
     //DBG("scene_center:" << scene_center);
     float scene_size = themesh->bsphere.r;
@@ -468,7 +485,9 @@ OrthoProjection getFullViewParams()
     float right = (float) width/diag * 0.5f * fov * neardist;
     float left = -right;
 
-    return OrthoProjection(left, right, bottom, top, neardist, fardist);
+    OrthoProjection fullViewProj(left, right, bottom, top, neardist, fardist);
+    DBG("Done. Full view projection [" << fullViewProj << "]");
+    return fullViewProj;
 }
 
 /*
@@ -511,7 +530,7 @@ OrthoProjection getFullViewParams()
 
 void setViewParams(const OrthoProjection &orthoProjData)
 {
-    DBG("orthoProjData: " << orthoProjData);
+    DBG_T("orthoProjData: " << orthoProjData);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -522,31 +541,43 @@ void setViewParams(const OrthoProjection &orthoProjData)
     glLoadIdentity();
 }
 
-void disectViews(const OrthoProjection &orthoFullView, unsigned partsPerAxis, OrthoProjection orthoViews[])
+std::vector<OrthoProjection> splitViews(unsigned partsPerAxis)
 {
-    float widthPart = (orthoFullView.right - orthoFullView.left) / partsPerAxis;
-    float heightPart = (orthoFullView.top - orthoFullView.bottom) / partsPerAxis;
+    DBG("partsPerAxis [" << partsPerAxis << "]");
+
+    const OrthoProjection orthoFullView = getFullViewParams();
+
+    float widthPart = (orthoFullView.right - orthoFullView.left) / float(partsPerAxis);
+    float heightPart = (orthoFullView.top - orthoFullView.bottom) / float(partsPerAxis);
+
+    DBG("widthPart [" << widthPart << "], heightPart [" << heightPart << "]");
+
+    if (widthPart <= 0 || heightPart <= 0) // Sanity
+        throw std::runtime_error("Width/Height cannot be <= 0");
 
     // XXX: If the stitches are not good enough it is possible I should use the end of one part as the start of the
     // other
 
+    std::vector<OrthoProjection> orthoViews;
+    unsigned count = 0;
     for (unsigned x = 0; x < partsPerAxis; x++)
     {
         for (unsigned y = 0; y < partsPerAxis; y++)
         {
-            unsigned i = x + y*partsPerAxis;
-
-            orthoViews[i].set(
-                orthoFullView.left + x*widthPart,
-                orthoFullView.left + x*(widthPart + 1),
-                orthoFullView.bottom + y*heightPart,
-                orthoFullView.bottom + y*(heightPart + 1),
+            orthoViews.push_back(OrthoProjection(
+                orthoFullView.left + x * widthPart,
+                orthoFullView.left + (x + 1) * widthPart,
+                orthoFullView.bottom + y * heightPart,
+                orthoFullView.bottom + (y + 1) * heightPart,
                 orthoFullView.neardist,
-                orthoFullView.fardist);
+                orthoFullView.fardist));
 
-            DBG("part " << i << ", x,y " << x << ", " << y << ", is:" << orthoViews[i]);
+            DBG("Index " << count << ", x,y " << x << ", " << y << ", is: " << orthoViews[count]);
+            count++;
         }
     }
+
+    return orthoViews;
 }
 
 void drawModel(trimesh::xform &xf)
@@ -554,19 +585,16 @@ void drawModel(trimesh::xform &xf)
     //DBG("---BEFORE---");
     //DBG("xf:\n" << xf);
 
-    // TODO: Consider using std array
-    static OrthoProjection orthoViews[screenDivider*screenDivider];
-    if (gCurrentMap == 0)
+    if (gRefresh)
     {
-        gOrthoProjData = getFullViewParams();
-        DBG("gOrthoProjData: " << gOrthoProjData);
+        DBG("Refreshing");
+        gOrthoViews = splitViews(FLAGS_grid);
+        gFullMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
 
-        disectViews(gOrthoProjData, screenDivider, orthoViews);
-
-        gCurrentMap = 1;
+        gRefresh = false;
     }
 
-    setViewParams(orthoViews[gCurrentMap]);
+    setViewParams(gOrthoViews[gViewIdx]);
 
     //printCurrentMatrixMode();
     //printModelViewMatrix();
@@ -611,13 +639,9 @@ void redraw(void *userData)
     DBG_T("Done");
 }
 
-bool exportMapAndOrthoData(const std::string &modelFile)
+bool exportCurrentViewAndOrthoData(const std::string &modelFile)
 {
     cv::Mat img = getCvMatFromScreen();
-    //cv::Mat gray;
-    //cvtColor(img, gray, CV_BGR2GRAY); // Perform gray scale conversion
-    //cv::Mat bw = gray.setTo(255, gray > 0);
-
     if (img.empty())
     {
         std::cout << "Export failed. img is empty" << std::endl;
@@ -625,15 +649,15 @@ bool exportMapAndOrthoData(const std::string &modelFile)
     }
 
     std::string prefix = getFileNameNoExt(modelFile);
-    std::string mapFileName =  prefix + "_map.png";
+    std::string mapFileName = prefix + "_cur_map.png";
     if (!cv::imwrite(mapFileName, img))
     {
         std::cout << "Failed saving map " << mapFileName << std::cout;
         return false;
     }
 
-    std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
-    if (!gOrthoProjData.write(orthoDataFileName))
+    std::string orthoDataFileName = prefix + "_cur_map_ortho_data.txt";
+    if (!gOrthoViews[gViewIdx].write(orthoDataFileName))
     {
         std::cout << "Failed saving ortho data " << orthoDataFileName << std::cout;
         return false;
@@ -678,14 +702,10 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
         break;
 
     case cv::EVENT_RBUTTONDOWN:
-        exportMapAndOrthoData(gModelFilePath);
         msg << "Mouse right press";
         break;
 
     case cv::EVENT_MBUTTONDOWN:
-        gCurrentMap++;
-        DBG("gCurrentMap update to: " << gCurrentMap);
-
         msg << "Mouse middle press";
         break;
 
@@ -714,6 +734,8 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
         msg << "Other " << event << ", flags " << flags;
     }
 
+    /*
+
     DBG(msg.str() << ", " << cv::Point(x, y) << ", flags: " << flags);
 
     cv::Mat img = getCvMatFromScreen();
@@ -732,10 +754,57 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
 
     DBG("Image size: " << bw.size());
 
-    float realX = gOrthoProjData.left + x/float(bw.cols) * (gOrthoProjData.right - gOrthoProjData.left);
-    float realY = gOrthoProjData.bottom + y/float(bw.rows) * (gOrthoProjData.top - gOrthoProjData.bottom);
+    OrthoProjection &orthoProj = gOrthoViews[gViewIdx];
+    float realX = orthoProj.left + x/float(bw.cols) * (orthoProj.right - orthoProj.left);
+    float realY = orthoProj.bottom + y/float(bw.rows) * (orthoProj.top - orthoProj.bottom);
 
     DBG("Real world coordinates: (X, Y): (" << realX << ", " << realY << ")");
+    */
+}
+
+void handleKeyboard(int key)
+{
+    if ((char)key == -1)
+        return;
+
+#if __linux__
+    key &= 0xff;
+#endif
+
+    //DBG("key [" << key << "], char [" << (char)key << "]");
+
+    switch (key)
+    {
+    case 'a':
+        gAutoNav = !gAutoNav;
+        DBG("gAutoNav update to: " << (gAutoNav ? "True" : "False"));
+        break;
+
+    case 's':
+        exportCurrentViewAndOrthoData(gModelFilePath);
+        break;
+
+    case 'r':
+        gRefresh = true;
+        DBG("Refresh");
+        break;
+
+    case 'n':
+        if (gViewIdx < gOrthoViews.size() - 1)
+        {
+            gViewIdx++;
+            DBG("gViewIdx update to: " << gViewIdx);
+        }
+        break;
+
+    case 'p':
+        if (gViewIdx > 0)
+        {
+            gViewIdx--;
+            DBG("gViewIdx update to: " << gViewIdx);
+        }
+        break;
+    }
 }
 
 void initWindow(const std::string &winName, int winWidth, int winHeight, void (*redrawFunc)(void *))
@@ -824,11 +893,72 @@ void loadModel(const std::string &fileName)
     upperView();
 }
 
+void autoNavigation()
+{
+    cv::Mat img = getCvMatFromScreen();
+    if (img.empty())
+        throw std::runtime_error("Image from screen is empty");
+
+    if (img.rows != gWinHeight || img.cols != gWinWidth) // Sanity
+        throw std::runtime_error("Image has different size than what is requested");
+
+    unsigned gridRow = gViewIdx % FLAGS_grid;
+    unsigned gridCol = gViewIdx / FLAGS_grid;
+    cv::Point offset(gridCol*gWinWidth, gFullMap.rows - (gridRow + 1) * gWinHeight);
+    cv::Rect gridRect(offset, cv::Size(gWinWidth, gWinHeight));
+
+    //DBG("gFullMap size " << gFullMap.size() << ", img size " << img.size() << ", gridRect " << gridRect);
+    //cv::namedWindow(std::to_string(gViewIdx));
+    //cv::imshow(std::to_string(gViewIdx), img);
+
+    img.copyTo(gFullMap(gridRect));
+
+    if (gViewIdx < gOrthoViews.size() - 1)
+    {
+        gViewIdx++;
+    }
+    else
+    {
+        DBG("Done navigation");
+        gAutoNav = false;
+
+        std::string prefix = getFileNameNoExt(gModelFilePath);
+        std::string mapFileName = prefix + "_map.png";
+        if (!cv::imwrite(mapFileName, gFullMap))
+        {
+            std::cout << "Failed saving map " << mapFileName << std::cout;
+            //return;
+        }
+
+        std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
+        if (!getFullViewParams().write(orthoDataFileName))
+        {
+            std::cout << "Failed saving ortho data " << orthoDataFileName << std::cout;
+            //return;
+        }
+
+        DBG("Map image and ortho data saved to [" << mapFileName << "] and [" << orthoDataFileName << "]");
+
+        cv::Mat fullResized;
+        cv::resize(gFullMap, fullResized, cv::Size(800, 600));
+        cv::namedWindow("fullMap Resized");
+        cv::imshow("fullMap Resized", fullResized);
+
+        cv::namedWindow("fullMap");
+        cv::imshow("fullMap", gFullMap);
+    }
+}
+
 int main(int argc, char* argv[])
 {
+    std::string usage = std::string(argv[0]) + " [model_file] [flags]";
+
+    GFLAGS_NAMESPACE::SetUsageMessage(usage);
+    GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
+
     if (argc < 2)
     {
-        std::cout << "Usage: " << argv[0] << " [model_file] [WinSize +#,+#]" << std::endl;
+        std::cout << "Usage: " << usage << std::endl;
 
         gModelFilePath = "../cube_layout.obj";
         std::cout << "Running with default model: " << gModelFilePath << std::endl;
@@ -853,11 +983,14 @@ int main(int argc, char* argv[])
     {
         cv::updateWindow(MAIN_WINDOW_NAME);
 
-        int key = cv::waitKey(0);
+        int key = cv::waitKey(100);
         if (key == 27) // ESC key
             break;
 
-        //handleKeyboard(key);
+        handleKeyboard(key);
+
+        if (gAutoNav)
+            autoNavigation();
     }
 
     cv::setOpenGlDrawCallback(MAIN_WINDOW_NAME, 0, 0);

@@ -60,8 +60,10 @@
 // gFlags - Configuration
 //
 DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
-DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
+DEFINE_string(pose, "", "Pose string to use as start-up. Format: \"x y yaw pitch\"");
+//DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
 DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
+DEFINE_bool(resume_export, false, "Use check_point.txt to resume samples export");
 
 DEFINE_bool(random_sampling, false, "Use random sampling or not");
 DEFINE_int32(samples_num, 300, "Number of (x, y) pts to sample in auto navigation");
@@ -252,9 +254,38 @@ cv::Mat projMat;
 
 int marksRadius = 4;
 
+std::vector<std::string> split(const std::string &s, char delim = ' ')
+{
+    std::stringstream ss(s);
+    std::string item;
+    std::vector<std::string> elems;
+    while (std::getline(ss, item, delim))
+    {
+        elems.push_back(std::move(item));
+    }
+
+    return elems;
+}
+
 struct SamplePose {
     SamplePose(float x, float y, float z, float yaw, float pitch, float roll) :
         x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
+    SamplePose(const std::string &poseStr)
+    {
+        std::vector<std::string> pose = split(poseStr);
+        if (pose.size() != 6)
+        {
+            DBG("Invalid -pose (x y z yaw pitch roll) [" << FLAGS_pose << "]");
+            throw std::invalid_argument("Invalid pose flag");
+        }
+
+        x = std::stof(pose[0]);
+        y = std::stof(pose[1]);
+        z = std::stof(pose[2]);
+        yaw = std::stof(pose[3]);
+        pitch = std::stof(pose[4]);
+        roll = std::stof(pose[5]);
+    }
 
     std::string print() const
     {
@@ -297,7 +328,6 @@ struct DataSet {
 std::map<std::string, DataSet> gDataSet;
 
 bool gAutoNavigation = false;
-unsigned gAutoNavigationIdx = 0;
 
 struct OrthoProjection {
     float left;
@@ -414,14 +444,19 @@ inline std::ostream& operator<<(std::ostream &out, const std::set<T> &set)
 }
 
 // Linux only. Creates a directory if it is not already exists
-void makeDir(const std::string &dirName)
+// returns true if directory was created
+//         false means a failure or directory already exists
+bool makeDir(const std::string &dirName)
 {
     struct stat sb;
     if (!(stat(dirName.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)))
     {
         if (mkdir(dirName.c_str(), ACCESSPERMS))
             throw std::runtime_error("Failed creating directory " + dirName);
+        return true;
     }
+
+    return false;
 }
 
 // E.g. input "C:\Dir\File.bat" -> "File.bat".
@@ -471,13 +506,13 @@ std::string getRunningExeFilePath()
     char szTmp[128];
     sprintf(szTmp, "/proc/%d/exe", getpid());
     int bytes = MIN(readlink(szTmp, pBuf, len), len - 1);
-    if(bytes >= 0) // Success
+    if (bytes >= 0) // Success
         isSuccess = true;
 
     pBuf[bytes] = '\0';
 #elif WIN32
     int bytes = GetModuleFileName(NULL, pBuf, len);
-    if(bytes) // Success
+    if (bytes) // Success
         isSuccess = true;
 #endif
 
@@ -560,6 +595,8 @@ inline void showPoints(cv::Mat &frame, const std::vector<cv::Point_<T>> &marks, 
 // Fixes a bug that sometime the initial resize does not stick and we get back to the default win size
 void verifySize(const std::string &winName)
 {
+    cv::setOpenGlContext(winName);
+
     GLint V[4];
     glGetIntegerv(GL_VIEWPORT, V);
     GLint width = V[2], height = V[3];
@@ -1136,6 +1173,8 @@ void redrawFaces(void *userData)
     DBG_T("Entered");
     //DrawData *data = static_cast<DrawData *>(userData);
 
+    verifySize(FACES_WINDOW_NAME);
+
     cls();
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
@@ -1247,9 +1286,16 @@ void resetView()
     }
     else
     {
+
         DBG("Reset view to look at the middle of the mesh, from reasonably far away");
+//#define ROUND_SAMPLING
+#ifdef ROUND_SAMPLING
         xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
             trimesh::xform::trans(-themesh->bsphere.center);
+#else
+        xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bbox.radius()) *
+            trimesh::xform::trans(-themesh->bbox.center());
+#endif
     }
 }
 
@@ -1810,6 +1856,31 @@ void populateModelEdges(float maxDihedralAngle = 135)
     DBG("Edges vector size: " << edges.size());
 }
 
+// Angles should be in degrees (Negative pitch is UP)
+trimesh::xform getXfFromPose(const SamplePose &ps)
+{
+    if (ps.z || ps.roll)
+        throw std::invalid_argument("Z and Roll are not supported");
+
+    // Determine the x,y position.
+    trimesh::xform xyzXf = trimesh::xform::trans(ps.x, ps.y, ps.z) *
+        trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], 0);
+    //DBG("xyzXf:\n" << xyzXf);
+
+    // Base rotation so we will be looking horizontally
+    xyzXf = getCamRotMatDeg(0.0, -90, 0.0) * xyzXf;
+    //DBG("xyzXf:\n" << xyzXf);
+
+    trimesh::xform yawXf = getCamRotMatDeg(ps.yaw, 0.0, 0.0);
+    trimesh::xform pitchXf = getCamRotMatDeg(0.0, ps.pitch, 0.0);
+    //DBG("yawXf:\n" << yawXf << ", pitchXf:\n" << pitchXf);
+
+    trimesh::xform fullXf = pitchXf * yawXf * xyzXf;
+    //DBG("fullXf:\n" << fullXf);
+
+    return fullXf;
+}
+
 void loadModel(const std::string &fileName)
 {
     themesh = std::unique_ptr<trimesh::TriMesh>(trimesh::TriMesh::read(fileName));
@@ -1821,8 +1892,9 @@ void loadModel(const std::string &fileName)
 
     themesh->need_tstrips();
     themesh->need_bsphere();
-    //themesh->need_bbox();
-    //DBG("bbox center: " << themesh->bbox.center() << ", bbox radius: " << themesh->bbox.radius());
+    themesh->need_bbox();
+    DBG("bbox center: " << themesh->bbox.center() << ", bbox radius: " << themesh->bbox.radius() <<
+        ", min: " << themesh->bbox.min << ", max: " << themesh->bbox.max);
     themesh->need_normals();
     themesh->need_curvatures();
     themesh->need_dcurv();
@@ -1835,11 +1907,18 @@ void loadModel(const std::string &fileName)
     DBG("Vertices num [" << themesh->vertices.size() << "], faces num [" << themesh->faces.size() <<
         "], tstrips num [" << themesh->tstrips.size() << "], normals num [" << themesh->normals.size() << "]");
 
-    // Generate xf file name from fileName
-    xfFileName = trimesh::xfname(fileName);
-    DBG("xfFileName: " << xfFileName);
 
-    resetView();
+    if (FLAGS_pose.empty())
+    {
+        // Generate xf file name from fileName
+        xfFileName = trimesh::xfname(fileName);
+        DBG("xfFileName: " << xfFileName);
+        resetView();
+    }
+    else
+    {
+        xf = getXfFromPose(SamplePose(FLAGS_pose));
+    }
 }
 
 void loadModelMap(const std::string &modelFile)
@@ -1853,6 +1932,7 @@ void loadModelMap(const std::string &modelFile)
         std::cout << "Failed loading map " << mapFileName << std::cout;
         return;
     }
+
     cvtColor(gModelMap, gModelMap, CV_BGR2GRAY); // Perform gray scale conversion
     gModelMap = gModelMap.setTo(255, gModelMap > 0);
 
@@ -2035,7 +2115,7 @@ void handleNavKeyboard(int key)
 void saveMarkedPoints()
 {
     std::ofstream outputFile(markedPtsFile);
-    if(!outputFile)
+    if (!outputFile)
     {
         DBG("Failed opening " << markedPtsFile);
         return;
@@ -2211,42 +2291,23 @@ void checkPoint(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv
     cv::circle(colorMap, mapPoint, 3, color, CV_FILLED);
 }
 
-
 void fillEachPointPoses(DataSet &dataSet)
 {
+    float z = 0; // Currently no height is added
+    float rollDeg = 0; // Currently no roll is added
     for (const cv::Point3f &p : dataSet.samplePoints)
     {
-        //DBG("center: " << center << ", radius: " << rad << ", random coords (x, y): (" << x << ", " << y << ")");
-
-        // Determine the x,y position.
-        trimesh::xform sampleXf = trimesh::xform::trans(p.x, p.y, 0) *
-            trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], 0);
-        //DBG("sampleXf:\n" << sampleXf);
-
-        // Base rotation so we will be looking horizontally
-        sampleXf = getCamRotMatDeg(0.0, -90, 0.0) * sampleXf;
-
-        // TODO: Should add height (z-axis) position
-
-        float rollDeg = 0; // Currently no roll is added
         for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
         {
-            trimesh::xform rotatedYawXf = getCamRotMatDeg(yawDeg, 0.0, 0.0);
-            //DBG("rotatedYawXf:\n" << rotatedYawXf);
-
-            // Remember that negative pitch values are UP
+            // Negative pitch values are UP
             for (float pitchDeg = 0;  pitchDeg >= -30; pitchDeg -= 5)
             {
-                trimesh::xform rotatedPitchXf = getCamRotMatDeg(0.0, pitchDeg, 0.0);
-                //DBG("rotatedPitchXf:\n" << rotatedPitchXf);
+                SamplePose pose(p.x, p.y, p.z, yawDeg, pitchDeg, rollDeg);
 
-                trimesh::xform rotatedXf = rotatedPitchXf * rotatedYawXf * sampleXf;
-                dataSet.xfSamples.push_back(rotatedXf);
+                trimesh::xform fullXf = getXfFromPose(pose);
 
-                dataSet.samplesData.push_back(SamplePose(p.x, p.y, p.z, yawDeg, pitchDeg, rollDeg));
-
-                //DBG("yawDeg: " << yawDeg << ", pitchDeg: " << pitchDeg << ", after rotation xf:\n" << rotatedXf);
-                //std::cin.get();
+                dataSet.xfSamples.push_back(fullXf);
+                dataSet.samplesData.push_back(pose);
             }
         }
     }
@@ -2257,13 +2318,43 @@ void populateXfVector()
     gDataSet["train"] = DataSet();
     gDataSet["test"] = DataSet();
 
+//#define ROUND_SAMPLING
+#ifdef ROUND_SAMPLING
     float rad = themesh->bsphere.r;
     //trimesh::vec center = themesh->bsphere.center;
 
     // Make the radius a bit bigger so we would catch the model from also "outside"
     // This should probably be a function of the max height and the FOV or a const.
     // Should try (rad = rad + -3.5f / fov * maxOrAvgBuildingHeight)
-    rad *= 1.5;
+    rad *= 0.8;
+
+    float xMin = -rad;
+    float xMax = rad;
+    float yMin = -rad;
+    float yMax = rad;
+#else
+
+    float width = themesh->bbox.max[0] - themesh->bbox.min[0];
+    float height = themesh->bbox.max[1] - themesh->bbox.min[1];
+
+    float xMin = -width/2;
+    float xMax = width/2;
+    float yMin = -height/2;
+    float yMax = height/2;
+
+    // Sampling area correction - probably due to model symmetry around
+    if (getFileName(FLAGS_model) == "berlin.obj")
+    {
+        yMin += height / 8;
+        yMax += height / 8;
+    }
+    else if (getFileName(FLAGS_model) == "cube_layout.obj")
+    {
+        xMax += height / 20;
+    }
+
+#endif
+    DBG("xMin [" << xMin << "], xMax [" << xMax << "], yMin [" << yMin << "], yMax [" << yMax << "]");
 
     float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
 
@@ -2277,8 +2368,8 @@ void populateXfVector()
 
         // Use dis to transform the random unsigned int generated by gen into a double in [1, 2)
         // Each call to dis(gen) generates a new random double
-        std::uniform_real_distribution<> disX(-rad, rad);
-        std::uniform_real_distribution<> disY(-rad, rad);
+        std::uniform_real_distribution<> disX(xMin, xMax);
+        std::uniform_real_distribution<> disY(yMin, yMax);
 
         // Generate test random points
         while (gDataSet["test"].samplePoints.size() < FLAGS_samples_num * FLAGS_test_percent)
@@ -2296,19 +2387,34 @@ void populateXfVector()
     }
     else
     {
-        float step = rad * 2 / FLAGS_grid_row_pts;
-        DBG("step [" << step << "]");
 
-        for (float x = -rad; x < rad; x += step)
-            for (float y = -rad; y < rad; y += step)
+#ifdef ROUND_SAMPLING
+        float stepX = rad * 2 / FLAGS_grid_row_pts;
+        float stepY = rad * 2 / FLAGS_grid_row_pts;
+#else
+        float stepX = width / FLAGS_grid_row_pts;
+        float stepY = height / FLAGS_grid_row_pts;
+#endif
+        DBG("stepX [" << stepX << "], stepY [" << stepY << "]");
+
+        for (float x = xMin; x < xMax; x += stepX)
+            for (float y = yMin; y < yMax; y += stepY)
                 checkPoint(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, samplesPositionsMap, green);
 
-        float offset = step * FLAGS_grid_row_pts_test_offset;
-        for (float x = -rad + offset; x < rad - offset; x += step)
-            for (float y = -rad + offset; y < rad - offset; y += step)
+        float offsetX = stepX * FLAGS_grid_row_pts_test_offset;
+        float offsetY = stepY * FLAGS_grid_row_pts_test_offset;
+        for (float x = xMin + offsetX; x < xMax - offsetX; x += stepX)
+            for (float y = yMin + offsetY; y < yMax - offsetY; y += stepY)
                 checkPoint(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, samplesPositionsMap, blue);
     }
-    imshowAndWait(samplesPositionsMap, 0);
+
+    std::string samplesPositionsMapFilePath = FLAGS_output_dir + "samplesPositionsMap.png";
+    cv::imwrite("lastSamplesPositionsMap.png", samplesPositionsMap);
+    if (!cv::imwrite(samplesPositionsMapFilePath, samplesPositionsMap))
+        std::cout << "Failed saving samplesPositionsMap to [" << samplesPositionsMapFilePath << "]" << std::endl;
+
+    cv::resize(samplesPositionsMap, samplesPositionsMap, cv::Size(FLAGS_win_width, FLAGS_win_height));
+    imshowAndWait(samplesPositionsMap, 0, "samplesPositionsMap");
 
     DBG("training points [" << gDataSet["train"].samplePoints.size() << "], testing points [" <<
         gDataSet["test"].samplePoints.size() << "]");
@@ -2453,20 +2559,100 @@ bool checkAndSaveCurrentSceen(const std::string &filePath)
     return true;
 }
 
+void saveCheckPoint(const std::string &modelFileName, const std::string &outDir, bool isTrain,
+    unsigned autoNavigationIdx, int exportsNum, int skipsNum)
+{
+    std::string checkPointFile("check_point.txt", std::ofstream::trunc);
+    std::ofstream outputFile(checkPointFile);
+    if (!outputFile.is_open())
+    {
+        DBG("Failed opening " << checkPointFile);
+        return;
+    }
+
+    outputFile << modelFileName << "\n";
+    outputFile << outDir << "\n";
+    outputFile << (isTrain ? "train" : "test") << "\n";
+    outputFile << autoNavigationIdx << ", " << exportsNum << ", " << skipsNum << "\n";
+
+    DBG("Done. checkPointFile [" << checkPointFile << "]");
+}
+
+void loadCheckPoint(const std::string &model_file_name, std::string &outDir, bool &isTrain,
+    unsigned &autoNavigationIdx, int &exportsNum, int &skipsNum)
+{
+    DBG("Loading check point");
+
+    std::string checkPointFile("check_point.txt", std::ofstream::trunc);
+    std::ifstream inputFile(checkPointFile);
+    if (!inputFile.is_open())
+    {
+        DBG("Failed opening " << checkPointFile);
+        throw std::runtime_error("Failed loading check point file");
+    }
+
+    std::string line;
+
+    std::getline(inputFile, line);
+    if (line != model_file_name)
+        throw std::runtime_error("Trying to resume export of different model " + line + " Vs. " + model_file_name);
+
+    std::getline(inputFile, line);
+    outDir = line;
+
+    std::getline(inputFile, line);
+    if (line == "train")
+        isTrain = true;
+    else if (line == "test")
+        isTrain = false;
+    else
+        throw std::runtime_error("Resume export exception. Unknown data-set [" + line + "]");
+
+    std::getline(inputFile, line);
+    sscanf(line.c_str(), "%u, %d, %d", &autoNavigationIdx, &exportsNum, &skipsNum);
+
+    DBG("Done loading check point data. set [" << (isTrain ? "Train" : "Test") << "], autoNavigationIdx [" <<
+        autoNavigationIdx << "], exportsNum [" << exportsNum << "], skipsNum [" << skipsNum << "]");
+}
+
+std::string loadOutputDirFromCheckPoint()
+{
+    bool dummyBool;
+    unsigned dummyUnsigned;
+    int dummyInt;
+    std::string outDir;
+    loadCheckPoint(getFileName(FLAGS_model), outDir, dummyBool, dummyUnsigned, dummyInt, dummyInt);
+    DBG("outDir [" << outDir << "]");
+    return outDir;
+}
+
 void autoNavigate()
 {
-    static int exportsNum = 0;
-    static int skipsNum = 0;
-    static bool isTrain = true;
+    static bool sIsTrain = true;
+    static unsigned sAutoNavigationIdx = 0;
+    static int sExportsNum = 0;
+    static int sSkipsNum = 0;
+
+    if (FLAGS_resume_export)
+    {
+        std::string dummy;
+        loadCheckPoint(getFileName(FLAGS_model), dummy, sIsTrain, sAutoNavigationIdx, sExportsNum, sSkipsNum);
+        FLAGS_resume_export = false;
+
+        // Pass sanity chech - few lines further...
+        std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
+        xf = xfSamples[sAutoNavigationIdx - 1];
+        return; // Render this xf to screen
+    }
 
     DBG_T("Entered");
 
-    std::vector<trimesh::xform> &xfSamples = isTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
-    std::vector<SamplePose> &samplesData = isTrain ? gDataSet["train"].samplesData : gDataSet["test"].samplesData;
+    std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
+    std::vector<SamplePose> &samplesData = sIsTrain ? gDataSet["train"].samplesData : gDataSet["test"].samplesData;
 
-    if (!gAutoNavigationIdx)
+    if (!sAutoNavigationIdx)
     {
-        makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (isTrain ? "train" : "test"));
+        makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
     }
     else
     {
@@ -2475,63 +2661,67 @@ void autoNavigate()
 
         // Take screen-shot of current pose and save the XF file in identical fileName
         std::stringstream ssDirName;
-        ssDirName << FLAGS_output_dir << (isTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
-            samplesData[gAutoNavigationIdx - 1].x << "_" << samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
+        ssDirName << FLAGS_output_dir << (sIsTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
+            samplesData[sAutoNavigationIdx - 1].x << "_" << samplesData[sAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
         makeDir(ssDirName.str());
 
         std::stringstream ssNum;
-        ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx - 1;
+        ssNum << std::setfill('0') << std::setw(6) << sAutoNavigationIdx - 1;
         std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
 
         if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
         {
             // Image is OK and was saved. Write also image data
-            samplesData[gAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
+            samplesData[sAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
 
             xf.write(sampleFilePathNoExt + ".xf");
 
-            exportsNum++;
+            sExportsNum++;
         }
         else
         {
-            skipsNum++;
+            sSkipsNum++;
         }
 
         // Sanity
-        if (xf != xfSamples[gAutoNavigationIdx - 1])
+        if (xf != xfSamples[sAutoNavigationIdx - 1])
         {
             throw std::runtime_error("Somehow the XF was modified before we returned here. This might suggest the "
                 "rendered image is not we think");
         }
     }
 
-    xf = xfSamples[gAutoNavigationIdx];
+    xf = xfSamples[sAutoNavigationIdx];
     //DBG("xf:\n" << xf);
 
-    if (FLAGS_debug || gAutoNavigationIdx % 1000 == 0)
+    if (FLAGS_debug || sAutoNavigationIdx % 1000 == 0)
     {
-        DBG("sample [#" << gAutoNavigationIdx << "/" << samplesData.size() << "], samplesData: " <<
-            samplesData[gAutoNavigationIdx]);
+        DBG("sample [#" << sAutoNavigationIdx << "/" << samplesData.size() << "], dataSet [" <<
+            (sIsTrain ? "Train" : "Test") << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum <<
+            "], samplesData [" << samplesData[sAutoNavigationIdx] << "]");
+
+        saveCheckPoint(getFileName(FLAGS_model), FLAGS_output_dir, sIsTrain, sAutoNavigationIdx, sExportsNum,
+            sSkipsNum);
     }
 
-    gAutoNavigationIdx++;
-    if (gAutoNavigationIdx == xfSamples.size())
+    sAutoNavigationIdx++;
+    if (sAutoNavigationIdx == xfSamples.size())
     {
-        DBG("Done auto navigating over [" << (isTrain ? "train" : "test") << "] set. Projections num [" <<
-            xfSamples.size() << "], exportsNum [" << exportsNum << "], skipsNum [" << skipsNum << "]");
+        DBG("Done auto navigating over [" << (sIsTrain ? "train" : "test") << "] set. Projections num [" <<
+            xfSamples.size() << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum << "]");
 
-        if (isTrain)
+        if (sIsTrain)
         {
-            isTrain = false;
+            sIsTrain = false;
         }
         else // test set is also done
         {
             setAutoNavState(false);
         }
 
-        gAutoNavigationIdx = 0;
-        exportsNum = 0;
-        skipsNum = 0;
+        sAutoNavigationIdx = 0;
+        sExportsNum = 0;
+        sSkipsNum = 0;
     }
 
     DBG_T("Done");
@@ -2570,12 +2760,14 @@ void initGoogleLogs(const std::string &appName)
 
 int main(int argc, char* argv[])
 {
-    std::string usage = std::string(argv[0]) + " [model_file] [image_file] [WinSize +#,+#] [flags]";
+    std::string usage = std::string(argv[0]) + " [model_file] [flags]";
 
     GFLAGS_NAMESPACE::SetUsageMessage(usage);
     GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
 
     handleOutputDir();
+    if (FLAGS_resume_export)
+        FLAGS_output_dir = loadOutputDirFromCheckPoint();
     initGoogleLogs(argv[0]);
     if (argc == 2)
     {

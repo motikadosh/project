@@ -31,7 +31,6 @@ $(OBJECTS): $(TOPDIR)/$(PLATFORM).mak | $(BUILD_FOLDER)
 -include $(OBJECTS:%.o=%.d)
 
 C_INC += -I$(TOPDIR)
-#L_FLAGS += -lGL -lGLU
 
 $(BUILD_FOLDER)/%.o: %.cpp
 	@echo "..Building $< ..."

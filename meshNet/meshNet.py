@@ -43,6 +43,7 @@ weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_
 
 test_only = False
 load_weights = True
+initial_epoch = 26
 if test_only:
     load_weights = True
 
@@ -54,7 +55,7 @@ debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    nb_epoch = 25
+    nb_epoch = 30
 elif debug_level == 1:  # Medium Debug
     part_of_data = 0.3
     nb_epoch = 15
@@ -266,7 +267,7 @@ def main():
                                              [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4]]),
-                            shuffle=True)
+                            shuffle=True, initial_epoch=initial_epoch)
         # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
         #                     validation_data = (loader.x_test, loader.y_test), shuffle = True)
     else:
