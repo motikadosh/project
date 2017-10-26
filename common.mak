@@ -28,7 +28,8 @@ else
                     -lopencv_calib3d \
                     -lopencv_video \
                     -lopencv_ml \
-                    -lopencv_imgcodecs
+                    -lopencv_imgcodecs \
+                    -lopencv_photo
     #OPENCV_INC = /usr/include
     OPENCV_INC = /usr/local/include
 endif

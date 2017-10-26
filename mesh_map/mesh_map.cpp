@@ -27,6 +27,7 @@
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include <opencv2/calib3d.hpp>
+#include "opencv2/photo.hpp"
 
 #include "TriMesh.h"
 #include "XForm.h"
@@ -65,6 +66,7 @@ int dbgCount = 0;
 #endif
 
 #define MAIN_WINDOW_NAME "OpenGL"
+#define DEPTH_WINDOW_NAME "Depth"
 
 //
 // Consts
@@ -120,12 +122,17 @@ std::string gModelFilePath;
 int gWinWidth = 800;
 int gWinHeight = 600;
 float fov = 0.7f;
-bool gRefresh = true;
+bool gReset = true;
 
 std::unique_ptr<trimesh::TriMesh> themesh;
 trimesh::xform xf; // Current location and orientation
 
-std::vector<std::pair<int, int> > edges;
+//cv::Mat gDepthImg(cv::Size(gWinWidth, gWinHeight), CV_8UC1);
+
+cv::Mat gFullMap;
+cv::Mat gFullGroundLevelEstimationMap;
+bool gAutoNav = false;
+bool gUpperView = true;
 
 struct OrthoProjection {
     float left;
@@ -167,9 +174,6 @@ struct OrthoProjection {
 };
 std::vector<OrthoProjection> gOrthoViews;
 unsigned gViewIdx = 0;
-
-cv::Mat gFullMap;
-bool gAutoNav = false;
 
 //
 // Utilities
@@ -219,6 +223,22 @@ std::string getFilePathNoExt(const std::string &filePath)
         return filePath;
 
     return filePath.substr(0, pos);
+}
+
+// Fixes a bug that sometime the initial resize does not stick and we get back to the default win size
+void verifySize(const std::string &winName)
+{
+    cv::setOpenGlContext(winName);
+
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLint width = V[2], height = V[3];
+
+    if (width == 100 && height == 30) // Default window size
+    {
+        DBG("Window BUG [" << winName << "] has default size. Resizing");
+        cv::resizeWindow(winName, gWinWidth, gWinHeight);
+    }
 }
 
 void printViewPort()
@@ -273,9 +293,53 @@ void printCurrentMatrixMode()
     DBG("Current matrix mode is: " << modeStr);
 }
 
-cv::Mat getCvMatFromScreen()
+std::string getOpenCVmatType(const cv::Mat &mat)
 {
-    cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
+    int number = mat.type();
+
+    // Find type
+    int imgTypeInt = number % 8;
+    std::string imgTypeString;
+
+    switch (imgTypeInt)
+    {
+        case 0:
+            imgTypeString = "8U";
+            break;
+        case 1:
+            imgTypeString = "8S";
+            break;
+        case 2:
+            imgTypeString = "16U";
+            break;
+        case 3:
+            imgTypeString = "16S";
+            break;
+        case 4:
+            imgTypeString = "32S";
+            break;
+        case 5:
+            imgTypeString = "32F";
+            break;
+        case 6:
+            imgTypeString = "64F";
+            break;
+        default:
+            break;
+    }
+
+    // find channel
+    int channel = (number/8) + 1;
+
+    std::stringstream type;
+    type<<"CV_"<<imgTypeString<<"C"<<channel;
+
+    return type.str();
+}
+
+cv::Mat getCvMatFromScreen(const std::string &winName)
+{
+    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
 
     // Read pixels
     GLint V[4];
@@ -298,6 +362,32 @@ cv::Mat getCvMatFromScreen()
     cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
 
     return img.clone();
+}
+
+cv::Mat getDepthCvMatFromScreen(const std::string &winName)
+{
+    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
+
+    // Read pixels
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLint width = V[2], height = V[3];
+    std::unique_ptr<float> buf = std::unique_ptr<float>(new float[width * height]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(V[0], V[1], width, height, GL_DEPTH_COMPONENT, GL_FLOAT, buf.get());
+
+    // Flip top-to-bottom
+    for (int i = 0; i < height / 2; i++)
+    {
+        float *row1 = buf.get() + width * i;
+        float *row2 = buf.get() + width * (height - 1 - i);
+        for (int j = 0; j < width; j++)
+            std::swap(row1[j], row2[j]);
+    }
+
+    cv::Mat img = cv::Mat(cv::Size(width, height), CV_32FC1, buf.get(), cv::Mat::AUTO_STEP).clone();
+
+    return img;
 }
 
 //
@@ -369,23 +459,12 @@ void drawEdge(int vertex1, int vertex2, int rgbColor)
     glVertex3fv(themesh->vertices[vertex2]);
 }
 
-void drawEdges()
-{
-    glLineWidth(1);
-
-    glBegin(GL_LINES);
-    // Mapping of vector index to color. I.e. first edge will be black(0, 0, 0)
-    for (unsigned i = 0; i < edges.size(); i++)
-        drawEdge(edges[i].first, edges[i].second, i);
-    glEnd();
-}
-
 static inline GLint myGluUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
 	const GLdouble *model, const GLdouble *proj, const GLint *view,
 	GLdouble* objX, GLdouble* objY, GLdouble* objZ)
 {
-    trimesh::xform xf = inv(trimesh::xform(proj) * trimesh::xform(model));
-    trimesh::Vec<3,double> v = xf * trimesh::Vec<3,double>(
+    trimesh::xform xfMat = inv(trimesh::xform(proj) * trimesh::xform(model));
+    trimesh::Vec<3,double> v = xfMat * trimesh::Vec<3,double>(
         (winX - view[0]) / view[2] * 2.0 - 1.0,
         (winY - view[1]) / view[3] * 2.0 - 1.0,
         winZ * 2.0 - 1.0);
@@ -457,7 +536,11 @@ OrthoProjection getFullViewParams()
 {
     DBG("Entered");
 
-    trimesh::point scene_center = xf * themesh->bsphere.center;
+    // Taken from upperView
+    trimesh::xform xfMat = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
+        trimesh::xform::trans(-themesh->bsphere.center);
+
+    trimesh::point scene_center = xfMat * themesh->bsphere.center;
     //DBG("scene_center:" << scene_center);
     float scene_size = themesh->bsphere.r;
 
@@ -528,19 +611,6 @@ OrthoProjection getFullViewParams()
 #endif
 }*/
 
-void setViewParams(const OrthoProjection &orthoProjData)
-{
-    DBG_T("orthoProjData: " << orthoProjData);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(orthoProjData.left, orthoProjData.right, orthoProjData.bottom, orthoProjData.top, orthoProjData.neardist,
-        orthoProjData.fardist);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-}
-
 std::vector<OrthoProjection> splitViews(unsigned partsPerAxis)
 {
     DBG("partsPerAxis [" << partsPerAxis << "]");
@@ -580,21 +650,68 @@ std::vector<OrthoProjection> splitViews(unsigned partsPerAxis)
     return orthoViews;
 }
 
+void setViewParams(const OrthoProjection &orthoProjData)
+{
+    DBG_T("orthoProjData: " << orthoProjData);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+//moti
+   // glMultMatrixd((double *)xf);
+    glOrtho(orthoProjData.left, orthoProjData.right, orthoProjData.bottom, orthoProjData.top, orthoProjData.neardist,
+        orthoProjData.fardist);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+}
+
+// Angles are in radians
+trimesh::XForm<double> getCamRotMatRad(float yaw, float pitch, float roll)
+{
+    float a = roll, b = yaw, c = pitch;
+
+    //http://msl.cs.uiuc.edu/planning/node102.html
+    trimesh::XForm<double> rotMat = trimesh::XForm<double>
+        (std::cos(a)*std::cos(b), std::cos(a)*std::sin(b)*std::sin(c)-std::sin(a)*std::cos(c),
+            std::cos(a)*std::sin(b)*std::cos(c)+std::sin(a)*std::sin(c), 0,
+
+         std::sin(a)*std::cos(b), std::sin(a)*std::sin(b)*std::sin(c)+std::cos(a)*std::cos(c),
+         std::sin(a)*std::sin(b)*std::cos(c)-std::cos(a)*std::sin(c), 0,
+
+         -std::sin(b), std::cos(b)*std::sin(c), std::cos(b)*std::cos(c), 0,
+
+         0, 0, 0, 1);
+
+    trimesh::transpose(rotMat); // Since XForm is column-major
+
+    //DBG("Rotation-\n" << rotMat);
+    return rotMat;
+}
+
+trimesh::XForm<double> getCamRotMatDeg(float yaw, float pitch, float roll)
+{
+    return getCamRotMatRad(DEG_TO_RAD(yaw), DEG_TO_RAD(pitch), DEG_TO_RAD(roll));
+}
+
+trimesh::xform gLastUsedXf;
+
 void drawModel(trimesh::xform &xf)
 {
     //DBG("---BEFORE---");
     //DBG("xf:\n" << xf);
 
-    if (gRefresh)
+    if (gReset)
     {
-        DBG("Refreshing");
+        DBG("Reseting...");
         gOrthoViews = splitViews(FLAGS_grid);
         gFullMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
+        gFullGroundLevelEstimationMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
+        gViewIdx = 0;
 
-        gRefresh = false;
+        gReset = false;
     }
 
-    setViewParams(gOrthoViews[gViewIdx]);
+    //setViewParams(gOrthoViews[gViewIdx]);
 
     //printCurrentMatrixMode();
     //printModelViewMatrix();
@@ -603,14 +720,27 @@ void drawModel(trimesh::xform &xf)
 
     // Transform and draw
     glPushMatrix();
-    glMultMatrixd((double *)xf);
+
+    trimesh::xform xfOrtho = trimesh::xform::ortho(gOrthoViews[gViewIdx].left,gOrthoViews[gViewIdx].right,
+            gOrthoViews[gViewIdx].bottom, gOrthoViews[gViewIdx].top,
+            gOrthoViews[gViewIdx].neardist, gOrthoViews[gViewIdx].fardist) * xf;
+
+    if (!gUpperView)
+    {
+        xfOrtho[14] *= -1;
+        xfOrtho = getCamRotMatDeg(0, 180 , 0) * xfOrtho;
+    }
+
+    gLastUsedXf = xfOrtho;
+    glMultMatrixd((double *)xfOrtho);
+
 
     //DBG("---AFTER---");
+    //DBG("xf:\n" << xf);
     //printModelViewMatrix();
     //printProjectionMatrix();
 
     drawFaces();
-    //drawEdges();
 
     glPopMatrix(); // Don't forget to pop the Matrix
 }
@@ -633,6 +763,8 @@ void redraw(void *userData)
 
     //DrawData *data = static_cast<DrawData *>(userData);
 
+    verifySize(MAIN_WINDOW_NAME);
+
     cls();
     drawModel(xf);
 
@@ -641,7 +773,7 @@ void redraw(void *userData)
 
 bool exportCurrentViewAndOrthoData(const std::string &modelFile)
 {
-    cv::Mat img = getCvMatFromScreen();
+    cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
     if (img.empty())
     {
         std::cout << "Export failed. img is empty" << std::endl;
@@ -738,7 +870,7 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
 
     DBG(msg.str() << ", " << cv::Point(x, y) << ", flags: " << flags);
 
-    cv::Mat img = getCvMatFromScreen();
+    cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
     //cv::Mat gray;
     //cvtColor(img, gray, CV_BGR2GRAY); // Perform gray scale conversion
     cv::Mat bw = img;//gray.setTo(255, gray > 0);
@@ -762,6 +894,134 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
     */
 }
 
+static inline GLint xfUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
+	const trimesh::xform &curXf, const GLint *view,
+	GLdouble *objX, GLdouble *objY, GLdouble *objZ)
+{
+    trimesh::xform xfMat = inv(curXf);
+    trimesh::Vec<3,double> v = xfMat * trimesh::Vec<3,double>(
+        (winX - view[0]) / view[2] * 2.0 - 1.0,
+        (winY - view[1]) / view[3] * 2.0 - 1.0,
+        winZ * 2.0 - 1.0);
+    *objX = v[0];
+    *objY = v[1];
+    *objZ = v[2];
+    return GL_TRUE;
+}
+
+cv::Mat getWorldDepth()
+{
+    cv::Mat depthImg = getDepthCvMatFromScreen(MAIN_WINDOW_NAME);
+    cv::Mat worldDepth(depthImg.size(), CV_8UC1, cv::Scalar());
+
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLdouble X, Y, Z;
+
+    for (int y = 0; y < depthImg.rows; y++)
+    {
+        for (int x = 0; x < depthImg.cols; x++)
+        {
+            char pWorldDepth;
+
+            if (depthImg.at<float>(y, x) < 1)
+            {
+                xfUnProject(x, y, depthImg.at<float>(y, x), gLastUsedXf, V, &X, &Y, &Z);
+
+                // Sanity checks
+                if (Z < 0)
+                    DBG("Negative depth [" << Z << "]");
+                if (Z > 254.0)
+                    DBG("Point value too High (Over 254) [" << Z << "]");
+
+                pWorldDepth = std::round(Z);
+            }
+            else
+            {
+                // Ground - Unknown value
+                pWorldDepth = 255;
+            }
+
+            worldDepth.at<char>(y, x) = pWorldDepth;
+        }
+    }
+
+    for (int y = 0; y < worldDepth.rows / 2; y++)
+    {
+        uchar *row1 = worldDepth.data + worldDepth.cols * y;
+        uchar *row2 = worldDepth.data + worldDepth.cols * (worldDepth.rows - 1 - y);
+        for (int x = 0; x < worldDepth.cols; x++)
+            std::swap(row1[x], row2[x]);
+    }
+
+    return worldDepth;
+}
+
+cv::Point gMouseDepthPointPress;
+std::string gMouseDepthStr1;
+std::string gMouseDepthStr2;
+void mouseCallbackDepthFunc(int event, int x, int y, int flags, void *userdata)
+{
+    if (event != cv::EVENT_LBUTTONDOWN)
+        return;
+
+    //printProjectionMatrix();
+    //printModelViewMatrix();
+    //DBG("xf\n" << xf);
+    //DBG("gLastUsedXf\n" << gLastUsedXf);
+
+    cv::Mat curDepthImg = getDepthCvMatFromScreen(MAIN_WINDOW_NAME);
+
+    cv::Point p(x, y);
+
+    GLdouble M[16], P[16];
+    GLint V[4];
+    glGetDoublev(GL_MODELVIEW_MATRIX, M);
+    glGetDoublev(GL_PROJECTION_MATRIX, P);
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLdouble X, Y, Z;
+
+    xfUnProject(x, y, curDepthImg.at<float>(y, x), gLastUsedXf, V, &X, &Y, &Z);
+
+    std::stringstream ss;
+    ss << "p " << p << ", depth [" << curDepthImg.at<float>(y, x) << "]";
+    std::stringstream ss1;
+    ss1 << "Unproject coordinates (X, Y, Z) [" << X << ", " << Y << ", " << Z << "]";
+
+    cv::Mat depthImg4show;
+    cvtColor(curDepthImg, depthImg4show, CV_GRAY2BGR);
+    //DBG("depthImg4show type " << getOpenCVmatType(depthImg4show));
+
+    // Write to globals to print on next updateDepth()
+    gMouseDepthPointPress = p;
+    gMouseDepthStr1 = ss.str();
+    gMouseDepthStr2 = ss1.str();
+}
+
+cv::Mat convertFloatMatToUchar(const cv::Mat &mat)
+{
+    double min, max;
+    cv::minMaxIdx(mat, &min, &max);
+    cv::Mat adjMap;
+    cv::convertScaleAbs(mat, adjMap, 255 / max);
+    DBG("adjMap type " << getOpenCVmatType(adjMap));
+    return adjMap;
+}
+
+void updateDepth()
+{
+    cv::Mat curDepthImg = getDepthCvMatFromScreen(MAIN_WINDOW_NAME);
+
+    if (gMouseDepthPointPress != cv::Point())
+    {
+        cv::circle(curDepthImg, gMouseDepthPointPress, 5, green, -1);
+        cv::putText(curDepthImg, gMouseDepthStr1, cv::Point(20, 20), cv::FONT_HERSHEY_SIMPLEX, 0.5, red, 1);
+        cv::putText(curDepthImg, gMouseDepthStr2, cv::Point(20, 40), cv::FONT_HERSHEY_SIMPLEX, 0.5, red, 1);
+    }
+
+    cv::imshow(DEPTH_WINDOW_NAME, curDepthImg);
+}
+
 void handleKeyboard(int key)
 {
     if ((char)key == -1)
@@ -778,6 +1038,12 @@ void handleKeyboard(int key)
     case 'a':
         gAutoNav = !gAutoNav;
         DBG("gAutoNav update to: " << (gAutoNav ? "True" : "False"));
+
+        if (gAutoNav)
+        {
+            gViewIdx = 0;
+            gUpperView = true;
+        }
         break;
 
     case 's':
@@ -785,7 +1051,7 @@ void handleKeyboard(int key)
         break;
 
     case 'r':
-        gRefresh = true;
+        gReset = true;
         DBG("Refresh");
         break;
 
@@ -803,6 +1069,13 @@ void handleKeyboard(int key)
             gViewIdx--;
             DBG("gViewIdx update to: " << gViewIdx);
         }
+        break;
+
+    case 'h':
+        gUpperView = true;
+        break;
+    case 'l':
+        gUpperView = false;
         break;
     }
 }
@@ -823,46 +1096,8 @@ void upperView()
     DBG("Reset view to look at the middle of the mesh, from reasonably far away");
     xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
         trimesh::xform::trans(-themesh->bsphere.center);
-}
 
-void populateModelEdges(float maxDihedralAngle = 135)
-{
-    std::set<std::pair<int, int> > edgesSet;
-    for (unsigned i = 0; i < themesh->faces.size(); i++)
-    {
-        for (unsigned j = 0; j < 3; j++)
-        {
-
-            // Calculate angle between 2 faces normals, if there is no adjacent face (Boundary), returned angle is 0
-            float angle = RAD_TO_DEG(themesh->dihedral(i, j));
-            //DBG("Angle between face " << i << " to across edge number " << j << " is " << angle);
-
-            // Skip faces that almost overlap (Probably curvatures)
-            if (angle > maxDihedralAngle)
-                continue;
-
-            int v1 = themesh->faces[i][(j + 1) % 3];
-            int v2 = themesh->faces[i][(j + 2) % 3];
-
-            // To make sure only unique edges enter the set I make sure first element is always bigger than second
-            std::pair<int, int> edge;
-            if (v1 > v2)
-                edge = std::make_pair(v1, v2);
-            else
-                edge = std::make_pair(v2, v1);
-
-            edgesSet.insert(edge);
-        }
-    }
-
-    // Now the set of edges is ready and without any duplicates, I convert it to a vector to have easier access and
-    // support already written code.
-
-    edges.clear();
-    for (auto edge : edgesSet)
-        edges.push_back(edge);
-
-    DBG("Edges vector size: " << edges.size());
+    //DBG("xf:\n" << xf);
 }
 
 void loadModel(const std::string &fileName)
@@ -884,8 +1119,6 @@ void loadModel(const std::string &fileName)
     themesh->need_faces();
     themesh->need_across_edge();
 
-    populateModelEdges(135);
-
     DBG("Mesh file [" << fileName << "] loaded");
     DBG("Vertices num [" << themesh->vertices.size() << "], faces num [" << themesh->faces.size() <<
         "], tstrips num [" << themesh->tstrips.size() << "], normals num [" << themesh->normals.size() << "]");
@@ -893,27 +1126,80 @@ void loadModel(const std::string &fileName)
     upperView();
 }
 
+cv::Mat gInpaintImg;
+void mouseCallbackInpaintFunc(int event, int x, int y, int flags, void *userdata)
+{
+    if (event != cv::EVENT_LBUTTONDOWN)
+        return;
+
+    cv::Point p(x, y);
+    DBG("p " << p << ", value [" << int(gInpaintImg.at<char>(y, x)) << "]");
+}
+
 void autoNavigation()
 {
-    cv::Mat img = getCvMatFromScreen();
-    if (img.empty())
-        throw std::runtime_error("Image from screen is empty");
-
-    if (img.rows != gWinHeight || img.cols != gWinWidth) // Sanity
-        throw std::runtime_error("Image has different size than what is requested");
-
     unsigned gridRow = gViewIdx % FLAGS_grid;
     unsigned gridCol = gViewIdx / FLAGS_grid;
     cv::Point offset(gridCol*gWinWidth, gFullMap.rows - (gridRow + 1) * gWinHeight);
     cv::Rect gridRect(offset, cv::Size(gWinWidth, gWinHeight));
 
-    //DBG("gFullMap size " << gFullMap.size() << ", img size " << img.size() << ", gridRect " << gridRect);
-    //cv::namedWindow(std::to_string(gViewIdx));
-    //cv::imshow(std::to_string(gViewIdx), img);
+    if (gUpperView)
+    {
+        cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
+        if (img.empty())
+            throw std::runtime_error("Image from screen is empty");
 
-    img.copyTo(gFullMap(gridRect));
+        if (img.rows != gWinHeight || img.cols != gWinWidth) // Sanity
+            throw std::runtime_error("Image has different size than what is requested");
 
-    if (gViewIdx < gOrthoViews.size() - 1)
+        //DBG("gFullMap size " << gFullMap.size() << ", img size " << img.size() << ", gridRect " << gridRect);
+        //cv::namedWindow(std::to_string(gViewIdx));
+        //cv::imshow(std::to_string(gViewIdx), img);
+
+        img.copyTo(gFullMap(gridRect));
+        gUpperView = false;
+    }
+    else
+    {
+        cv::Mat worldDepthImg = getWorldDepth();
+
+        // Inpainting mask, 8-bit 1-channel image. Non-zero pixels indicate the area that needs to be inpainted.
+        cv::Mat inpaintMask;
+        cv::cvtColor(gFullMap(gridRect), inpaintMask, CV_BGR2GRAY); // Perform gray scale conversion
+        inpaintMask = 255 - inpaintMask;         //cv::imshow("inpaintMask", inpaintMask);
+
+        // Adding border to solve some artifact bug on image borders
+        cv::copyMakeBorder(inpaintMask, inpaintMask, 5, 5, 5, 5, cv::BORDER_CONSTANT, 255);
+        cv::copyMakeBorder(worldDepthImg, worldDepthImg, 5, 5, 5, 5, cv::BORDER_CONSTANT, 255);
+
+        cv::Mat inpaintImg;
+        cv::inpaint(worldDepthImg, inpaintMask, inpaintImg, 5, cv::INPAINT_NS); //INPAINT_NS or INPAINT_TELEA
+        // Removing the border
+        inpaintImg = inpaintImg(cv::Rect(cv::Point(5, 5), cv::Size(gWinWidth, gWinHeight)));
+
+        /* if (0)
+        {
+            // Inpaint debug section
+            cv::imshow("worldDepthImg", worldDepthImg);
+            cv::imshow("inpaintMask", inpaintMask);
+            gInpaintImg = inpaintImg;
+            cv::namedWindow("inpaintImg", cv::WINDOW_AUTOSIZE);
+            cv::setMouseCallback("inpaintImg", mouseCallbackInpaintFunc, NULL);
+            cv::imshow("inpaintImg", inpaintImg);
+            cv::waitKey(0);
+        } */
+
+        cv::cvtColor(inpaintImg, inpaintImg, CV_GRAY2BGR);
+        inpaintImg.copyTo(gFullGroundLevelEstimationMap(gridRect));
+
+        gUpperView = true;
+    }
+
+    if (gUpperView == false)
+    {
+        // Wait another iteration (Getting underground look)
+    }
+    else if (gViewIdx < gOrthoViews.size() - 1)
     {
         gViewIdx++;
     }
@@ -923,29 +1209,37 @@ void autoNavigation()
         gAutoNav = false;
 
         std::string prefix = getFileNameNoExt(gModelFilePath);
+
         std::string mapFileName = prefix + "_map.png";
         if (!cv::imwrite(mapFileName, gFullMap))
         {
             std::cout << "Failed saving map " << mapFileName << std::cout;
-            //return;
+        }
+
+        std::string groundLevelEstimationFileName = prefix + "_ground_level_map.png";
+        if (!cv::imwrite(groundLevelEstimationFileName, gFullGroundLevelEstimationMap))
+        {
+            std::cout << "Failed saving map " << groundLevelEstimationFileName << std::cout;
         }
 
         std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
         if (!getFullViewParams().write(orthoDataFileName))
         {
             std::cout << "Failed saving ortho data " << orthoDataFileName << std::cout;
-            //return;
         }
 
-        DBG("Map image and ortho data saved to [" << mapFileName << "] and [" << orthoDataFileName << "]");
+        DBG("Map, ground-level images and ortho data saved to [" << mapFileName << "], [" <<
+            groundLevelEstimationFileName << "] and [" << orthoDataFileName << "]");
 
         cv::Mat fullResized;
         cv::resize(gFullMap, fullResized, cv::Size(800, 600));
-        cv::namedWindow("fullMap Resized");
-        cv::imshow("fullMap Resized", fullResized);
+        cv::imshow("fullMap-resized", fullResized);
 
-        cv::namedWindow("fullMap");
-        cv::imshow("fullMap", gFullMap);
+        //cv::imshow("fullMap", gFullMap);
+
+        cv::Mat fullGroundResized;
+        cv::resize(gFullGroundLevelEstimationMap, fullGroundResized, cv::Size(800, 600));
+        cv::imshow("full-ground-level-resized", fullGroundResized);
     }
 }
 
@@ -979,9 +1273,14 @@ int main(int argc, char* argv[])
     initWindow(MAIN_WINDOW_NAME, gWinWidth, gWinHeight, redraw);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseCallbackFunc, NULL);
 
+    cv::namedWindow(DEPTH_WINDOW_NAME, cv::WINDOW_AUTOSIZE);
+    cv::setMouseCallback(DEPTH_WINDOW_NAME, mouseCallbackDepthFunc, NULL);
+    cv::moveWindow(DEPTH_WINDOW_NAME, 50, 50);
+
     for (;;)
     {
         cv::updateWindow(MAIN_WINDOW_NAME);
+        updateDepth();
 
         int key = cv::waitKey(100);
         if (key == 27) // ESC key
