@@ -130,7 +130,7 @@ trimesh::xform xf; // Current location and orientation
 //cv::Mat gDepthImg(cv::Size(gWinWidth, gWinHeight), CV_8UC1);
 
 cv::Mat gFullMap;
-cv::Mat gFullGroundLevelEstimationMap;
+cv::Mat gFullGroundLevelMap;
 bool gAutoNav = false;
 bool gUpperView = true;
 
@@ -705,7 +705,7 @@ void drawModel(trimesh::xform &xf)
         DBG("Reseting...");
         gOrthoViews = splitViews(FLAGS_grid);
         gFullMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
-        gFullGroundLevelEstimationMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
+        gFullGroundLevelMap = cv::Mat(gWinHeight*FLAGS_grid, gWinWidth*FLAGS_grid, CV_8UC3);
         gViewIdx = 0;
 
         gReset = false;
@@ -1190,7 +1190,7 @@ void autoNavigation()
         } */
 
         cv::cvtColor(inpaintImg, inpaintImg, CV_GRAY2BGR);
-        inpaintImg.copyTo(gFullGroundLevelEstimationMap(gridRect));
+        inpaintImg.copyTo(gFullGroundLevelMap(gridRect));
 
         gUpperView = true;
     }
@@ -1216,10 +1216,10 @@ void autoNavigation()
             std::cout << "Failed saving map " << mapFileName << std::cout;
         }
 
-        std::string groundLevelEstimationFileName = prefix + "_ground_level_map.png";
-        if (!cv::imwrite(groundLevelEstimationFileName, gFullGroundLevelEstimationMap))
+        std::string groundLevelFileName = prefix + "_ground_level_map.png";
+        if (!cv::imwrite(groundLevelFileName, gFullGroundLevelMap))
         {
-            std::cout << "Failed saving map " << groundLevelEstimationFileName << std::cout;
+            std::cout << "Failed saving map " << groundLevelFileName << std::cout;
         }
 
         std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
@@ -1229,7 +1229,7 @@ void autoNavigation()
         }
 
         DBG("Map, ground-level images and ortho data saved to [" << mapFileName << "], [" <<
-            groundLevelEstimationFileName << "] and [" << orthoDataFileName << "]");
+            groundLevelFileName << "] and [" << orthoDataFileName << "]");
 
         cv::Mat fullResized;
         cv::resize(gFullMap, fullResized, cv::Size(800, 600));
@@ -1238,7 +1238,7 @@ void autoNavigation()
         //cv::imshow("fullMap", gFullMap);
 
         cv::Mat fullGroundResized;
-        cv::resize(gFullGroundLevelEstimationMap, fullGroundResized, cv::Size(800, 600));
+        cv::resize(gFullGroundLevelMap, fullGroundResized, cv::Size(800, 600));
         cv::imshow("full-ground-level-resized", fullGroundResized);
     }
 }
