@@ -23,7 +23,6 @@
 
 #include "opencv2/core.hpp"
 #include "opencv2/core/opengl.hpp"
-//#include "opencv2/core/cuda.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include <opencv2/calib3d.hpp>
@@ -460,8 +459,8 @@ void drawEdge(int vertex1, int vertex2, int rgbColor)
 }
 
 static inline GLint myGluUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
-	const GLdouble *model, const GLdouble *proj, const GLint *view,
-	GLdouble* objX, GLdouble* objY, GLdouble* objZ)
+    const GLdouble *model, const GLdouble *proj, const GLint *view,
+    GLdouble* objX, GLdouble* objY, GLdouble* objZ)
 {
     trimesh::xform xfMat = inv(trimesh::xform(proj) * trimesh::xform(model));
     trimesh::Vec<3,double> v = xfMat * trimesh::Vec<3,double>(
@@ -800,18 +799,18 @@ bool exportCurrentViewAndOrthoData(const std::string &modelFile)
 }
 
 // OpenCV Mouse - cv::setMouseCallback()
-//   EVENT_MOUSEMOVE 	indicates that the mouse pointer has moved over the window.
-//   EVENT_LBUTTONDOWN 	indicates that the left mouse button is pressed.
-//   EVENT_RBUTTONDOWN 	indicates that the right mouse button is pressed.
-//   EVENT_MBUTTONDOWN 	indicates that the middle mouse button is pressed.
-//   EVENT_LBUTTONUP 	indicates that left mouse button is released.
-//   EVENT_RBUTTONUP 	indicates that right mouse button is released.
-//   EVENT_MBUTTONUP 	indicates that middle mouse button is released.
-//   EVENT_LBUTTONDBLCLK 	indicates that left mouse button is double clicked.
-//   EVENT_RBUTTONDBLCLK 	indicates that right mouse button is double clicked.
-//   EVENT_MBUTTONDBLCLK 	indicates that middle mouse button is double clicked.
-//   EVENT_MOUSEWHEEL 	positive and negative values mean forward and backward scrolling, respectively.
-//   EVENT_MOUSEHWHEEL 	positive and negative values mean right and left scrolling, respectively.
+//   EVENT_MOUSEMOVE      indicates that the mouse pointer has moved over the window.
+//   EVENT_LBUTTONDOWN    indicates that the left mouse button is pressed.
+//   EVENT_RBUTTONDOWN    indicates that the right mouse button is pressed.
+//   EVENT_MBUTTONDOWN    indicates that the middle mouse button is pressed.
+//   EVENT_LBUTTONUP      indicates that left mouse button is released.
+//   EVENT_RBUTTONUP      indicates that right mouse button is released.
+//   EVENT_MBUTTONUP      indicates that middle mouse button is released.
+//   EVENT_LBUTTONDBLCLK  indicates that left mouse button is double clicked.
+//   EVENT_RBUTTONDBLCLK  indicates that right mouse button is double clicked.
+//   EVENT_MBUTTONDBLCLK  indicates that middle mouse button is double clicked.
+//   EVENT_MOUSEWHEEL     positive and negative values mean forward and backward scrolling, respectively.
+//   EVENT_MOUSEHWHEEL    positive and negative values mean right and left scrolling, respectively.
 void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
 {
     std::stringstream msg;
@@ -895,8 +894,8 @@ void mouseCallbackFunc(int event, int x, int y, int flags, void *userdata)
 }
 
 static inline GLint xfUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
-	const trimesh::xform &curXf, const GLint *view,
-	GLdouble *objX, GLdouble *objY, GLdouble *objZ)
+    const trimesh::xform &curXf, const GLint *view,
+    GLdouble *objX, GLdouble *objY, GLdouble *objZ)
 {
     trimesh::xform xfMat = inv(curXf);
     trimesh::Vec<3,double> v = xfMat * trimesh::Vec<3,double>(
