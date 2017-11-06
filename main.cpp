@@ -60,7 +60,7 @@
 // gFlags - Configuration
 //
 DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
-DEFINE_string(pose, "", "Pose string to use as start-up. Format: \"x y yaw pitch\"");
+DEFINE_string(pose, "", "Pose string to use as start-up. Format: \"x y z yaw pitch roll\"");
 //DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
 DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
 DEFINE_bool(resume_export, false, "Use check_point.txt to resume samples export");
@@ -68,9 +68,9 @@ DEFINE_bool(resume_export, false, "Use check_point.txt to resume samples export"
 DEFINE_bool(random_sampling, false, "Use random sampling or not");
 DEFINE_int32(samples_num, 300, "Number of (x, y) pts to sample in auto navigation");
 DEFINE_double(test_percent, 0.2, "Test percent");
-DEFINE_int32(grid_row_pts, 20,
-    "Number of (x, y) pts to sample on each grid row in auto navigation, column is induced");
-DEFINE_double(grid_row_pts_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
+DEFINE_int32(grid, 20, "Number of (x, y) pts to sample on each grid row in auto navigation, column is induced");
+DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
+DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
 
 DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
@@ -95,6 +95,7 @@ const float PI = 3.14159265358979323846264f;
 #define VERTEX_WINDOW_NAME "vertex_win"
 #define FACES_WINDOW_NAME "faces_win"
 #define CV_WINDOW_NAME "cv_win"
+#define UPPER_MAP_WINDOW_NAME "upper_map"
 
 #define DBG(params) \
     do { \
@@ -275,7 +276,7 @@ struct SamplePose {
         std::vector<std::string> pose = split(poseStr);
         if (pose.size() != 6)
         {
-            DBG("Invalid -pose (x y z yaw pitch roll) [" << FLAGS_pose << "]");
+            DBG("Invalid -pose (x y z yaw pitch roll) [" << poseStr << "]");
             throw std::invalid_argument("Invalid pose flag");
         }
 
@@ -328,6 +329,7 @@ struct DataSet {
 std::map<std::string, DataSet> gDataSet;
 
 bool gAutoNavigation = false;
+unsigned gAutoNavigationIdx = 0;
 
 struct OrthoProjection {
     float left;
@@ -388,12 +390,24 @@ struct OrthoProjection {
         return true;
     }
 
+    cv::Point convertWorldPointToMap(const cv::Point3f &p, const cv::Size &mapSize)
+    {
+        int mapX = (p.x - left) / (right - left) * mapSize.width;
+        int mapY = (p.y - bottom) / (top - bottom) * mapSize.height;
+
+        return cv::Point(mapX, mapY);
+    }
+
 private:
     const std::string SEP = "=";
 };
 OrthoProjection gOrthoProjData(0, 0, 0, 0, 0, 0);
 
 cv::Mat gModelMap;
+cv::Mat gGroundLevelMap;
+
+cv::Mat gSamplesMap;
+cv::Mat gUpperMapShow;
 
 //
 // Pre-declarations
@@ -526,6 +540,72 @@ std::string getRunningExeFilePath()
     return pBuf;
 }
 
+static size_t findLastWhiteSpace(const std::string &str)
+{
+    for (std::string::const_iterator it = str.end(); it != str.begin(); --it)
+    {
+        if (std::isspace(*it))
+            return it - str.begin();
+    }
+
+    return std::string::npos;
+}
+
+void myPutText(cv::Mat &img, std::stringstream &ss, cv::Point org, bool lineWrap = true, bool autoScale = true,
+    int fontFace = cv::FONT_HERSHEY_COMPLEX_SMALL, double fontScale = 0.8, cv::Scalar color = red,
+    int thickness = 1, int lineType = 8, bool bottomLeftOrigin = false)
+{
+    if (autoScale)
+    {
+        // TODO: Get real window size
+        float sizeFactor = std::min(img.rows, img.cols) / 480.0f;
+
+        fontScale = fontScale * sizeFactor;
+        thickness = int (thickness * sizeFactor);
+
+        // Make sure the the new height does not exceed screen top
+        int baseLine;
+        cv::Size textSize = cv::getTextSize("A", fontFace, fontScale, thickness, &baseLine);
+        if (org.y < textSize.height)
+            org.y = int(textSize.height + std::min(img.rows, img.cols) * 0.01f);
+    }
+
+    unsigned offset = 0;
+    std::string line;
+    do
+    {
+        std::getline(ss, line);
+
+        do
+        {
+            int baseLine;
+            cv::Size textSize = cv::getTextSize(line, fontFace, fontScale, thickness, &baseLine);
+            size_t splitPos = line.length();
+
+            // Handle line wrapping
+            while (lineWrap && org.x + textSize.width > img.cols)
+            {
+                size_t pos = findLastWhiteSpace(line.substr(0, splitPos));
+                if (pos == std::string::npos)
+                    break;
+                else
+                    splitPos = pos;
+
+                textSize = cv::getTextSize(line.substr(0, splitPos), fontFace, fontScale, thickness, &baseLine);
+            }
+
+            cv::putText(img, line.substr(0, splitPos), org + cv::Point(0, offset), fontFace, fontScale,
+                color, thickness, lineType, bottomLeftOrigin);
+
+            line = line.substr(splitPos < line.length() ? splitPos + 1 : splitPos);
+
+            offset += textSize.height + baseLine;
+        }
+        while (!line.empty());
+
+    } while (!ss.eof());
+}
+
 void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp")
 {
     if (img.empty())
@@ -567,8 +647,8 @@ void printModelViewMatrix()
     DBG("GL model view mat:\n" << glModelViewMat);
 
     // Sanity check
-    for (auto i : modelview)
-        DBG(i);
+    //for (auto i : modelview)
+      //  DBG(i);
 }
 
 #define FONT_SCALE 2
@@ -1213,6 +1293,8 @@ void redraw(void *userData)
 
     //DrawData *data = static_cast<DrawData *>(userData);
 
+    verifySize(MAIN_WINDOW_NAME);
+
     cls();
     drawModel(xf, camera);
 
@@ -1286,16 +1368,9 @@ void resetView()
     }
     else
     {
-
         DBG("Reset view to look at the middle of the mesh, from reasonably far away");
-//#define ROUND_SAMPLING
-#ifdef ROUND_SAMPLING
         xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
             trimesh::xform::trans(-themesh->bsphere.center);
-#else
-        xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bbox.radius()) *
-            trimesh::xform::trans(-themesh->bbox.center());
-#endif
     }
 }
 
@@ -1859,24 +1934,26 @@ void populateModelEdges(float maxDihedralAngle = 135)
 // Angles should be in degrees (Negative pitch is UP)
 trimesh::xform getXfFromPose(const SamplePose &ps)
 {
-    if (ps.z || ps.roll)
+    if (ps.roll)
         throw std::invalid_argument("Z and Roll are not supported");
 
-    // Determine the x,y position.
-    trimesh::xform xyzXf = trimesh::xform::trans(ps.x, ps.y, ps.z) *
+    // Determine the x,y position
+    trimesh::xform xyzXf = trimesh::xform::trans(-ps.x, ps.y, ps.z) *
         trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], 0);
-    //DBG("xyzXf:\n" << xyzXf);
+    DBG("xyzXf:\n" << xyzXf);
 
     // Base rotation so we will be looking horizontally
     xyzXf = getCamRotMatDeg(0.0, -90, 0.0) * xyzXf;
-    //DBG("xyzXf:\n" << xyzXf);
+    DBG("base rot:\n" << xyzXf);
 
     trimesh::xform yawXf = getCamRotMatDeg(ps.yaw, 0.0, 0.0);
     trimesh::xform pitchXf = getCamRotMatDeg(0.0, ps.pitch, 0.0);
-    //DBG("yawXf:\n" << yawXf << ", pitchXf:\n" << pitchXf);
+    DBG("yaw and pitch:\n" << yawXf << ", pitchXf:\n" << pitchXf);
 
     trimesh::xform fullXf = pitchXf * yawXf * xyzXf;
-    //DBG("fullXf:\n" << fullXf);
+
+    DBG("SamplePose " << ps);
+    DBG("fullXf:\n" << fullXf);
 
     return fullXf;
 }
@@ -1924,25 +2001,40 @@ void loadModel(const std::string &fileName)
 void loadModelMap(const std::string &modelFile)
 {
     std::string prefix = getFileNameNoExt(modelFile);
-    std::string mapFileName =  prefix + "_map.png";
 
+    std::string mapFileName =  prefix + "_map.png";
     gModelMap = cv::imread(mapFileName);
     if (gModelMap.empty())
     {
+        throw std::runtime_error("Failed loading map");
         std::cout << "Failed loading map " << mapFileName << std::cout;
         return;
     }
 
+    gSamplesMap = gModelMap.clone();
     cvtColor(gModelMap, gModelMap, CV_BGR2GRAY); // Perform gray scale conversion
     gModelMap = gModelMap.setTo(255, gModelMap > 0);
-
     DBG("Model map loaded. size " << gModelMap.size() << ", channels [" << gModelMap.channels() << "]");
-
     //imshowAndWait(gModelMap, 0);
+
+    std::string groundLevelFileName = prefix + "_ground_level_map.png";
+    gGroundLevelMap = cv::imread(groundLevelFileName);
+    if (gGroundLevelMap.empty())
+    {
+        std::cout << "Failed loading groud-level map " << groundLevelFileName << std::cout;
+        return;
+    }
+
+    cvtColor(gGroundLevelMap, gGroundLevelMap, CV_BGR2GRAY); // Perform gray scale conversion
+    DBG("Ground-level map loaded. size " << gGroundLevelMap.size() << ", channels [" << gGroundLevelMap.channels() <<
+        "]");
+    //imshowAndWait(gGroundLevelMap, 0);
+
+    if (gModelMap.size() != gGroundLevelMap.size()) // Sanity
+        throw std::runtime_error("gModelMap.size() != gGroundLevelMap.size()");
 
     std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
     gOrthoProjData.read(orthoDataFileName);
-
     DBG("Model Ortho Projection data " << gOrthoProjData);
 }
 
@@ -1962,7 +2054,7 @@ void handleMenuKeyboard(int key)
     //    facesColorGL = facesColorGL == whiteGL ? blackGL : whiteGL;
     //    break;
 
-    case 'i':
+    case 'S':
         takeScreenshot();
         break;
 
@@ -2032,6 +2124,23 @@ void handleNavKeyboard(int key)
 
     case 'g':
         setAutoNavState(!gAutoNavigation);
+        break;
+
+    case 'i':
+        gAutoNavigationIdx++;
+        DBG("Up gAutoNavigationIdx [" << gAutoNavigationIdx << "]");
+        break;
+    case 'I':
+        gAutoNavigationIdx--;
+        DBG("Down gAutoNavigationIdx [" << gAutoNavigationIdx << "]");
+        break;
+    case 'o':
+        {
+            xf = gDataSet["train"].xfSamples[gAutoNavigationIdx];
+
+            DBG("Jumping to train sample [#" << gAutoNavigationIdx << "], pose [" <<
+                gDataSet["train"].samplesData[gAutoNavigationIdx] << "], xf\n" << xf);
+        }
         break;
 
     case 'y':
@@ -2269,22 +2378,32 @@ void handleKeyboard(int key)
     }
 }
 
-void checkPoint(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv::Mat &colorMap,
+void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv::Mat &colorMap,
     const cv::Scalar &goodColor)
 {
-    int mapX = (p.x - gOrthoProjData.left) / (gOrthoProjData.right - gOrthoProjData.left) * gModelMap.cols;
-    int mapY = (p.y - gOrthoProjData.bottom) / (gOrthoProjData.top - gOrthoProjData.bottom) * gModelMap.rows;
-    cv::Point mapPoint = cv::Point(mapX, mapY);
+    cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
+
+    if (mapPoint.x < 0 || mapPoint.x >= gModelMap.cols || mapPoint.y < 0 || mapPoint.y >= gModelMap.rows)
+    {
+        DBG_T("P is out of map area. Skipping");
+        return;
+    }
 
     cv::Scalar color;
-    if (mapX >= 0 && mapX < gModelMap.cols && mapY >= 0 && mapY < gModelMap.rows && gModelMap.at<char>(mapY, mapX))
+    if (gModelMap.at<char>(mapPoint.y, mapPoint.x))
     {
         DBG_T("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " is not free");
         color = red;
     }
+    else if (gGroundLevelMap.at<char>(mapPoint.y, mapPoint.x) == 255)
+    {
+        DBG_T("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " unknown ground level");
+        color = orange;
+    }
     else
     {
-        samplePoints.push_back(p);
+        cv::Point3f pWithZ(p.x, p.y, gGroundLevelMap.at<char>(mapPoint.y, mapPoint.x) + FLAGS_camera_height);
+        samplePoints.push_back(pWithZ);
         color = goodColor;
     }
 
@@ -2293,10 +2412,11 @@ void checkPoint(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv
 
 void fillEachPointPoses(DataSet &dataSet)
 {
-    float z = 0; // Currently no height is added
     float rollDeg = 0; // Currently no roll is added
+#if 1
     for (const cv::Point3f &p : dataSet.samplePoints)
     {
+        int anglesPerXY = 0;
         for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
         {
             // Negative pitch values are UP
@@ -2308,9 +2428,26 @@ void fillEachPointPoses(DataSet &dataSet)
 
                 dataSet.xfSamples.push_back(fullXf);
                 dataSet.samplesData.push_back(pose);
+
+                if (dataSet.samplesData.size() % 10000 == 0)
+                    DBG("Pose [#" << dataSet.samplesData.size() - 1 << "] example [" << pose << "], xf\n" << xf);
+                anglesPerXY++;
             }
         }
+
+        //DBG("anglesPerXY [" << anglesPerXY << "]");
     }
+#else // No angles - good for debugging
+    for (const cv::Point3f &p : dataSet.samplePoints)
+    {
+        SamplePose pose(p.x, p.y, p.z, 0, 0, rollDeg);
+
+        trimesh::xform fullXf = getXfFromPose(pose);
+
+        dataSet.xfSamples.push_back(fullXf);
+        dataSet.samplesData.push_back(pose);
+    }
+#endif
 }
 
 void populateXfVector()
@@ -2358,9 +2495,6 @@ void populateXfVector()
 
     float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
 
-    cv::Mat samplesPositionsMap;
-    cvtColor(gModelMap, samplesPositionsMap, CV_GRAY2RGB);
-
     if (FLAGS_random_sampling)
     {
         std::random_device rd;  // Will be used to obtain a seed for the random number engine
@@ -2375,46 +2509,43 @@ void populateXfVector()
         while (gDataSet["test"].samplePoints.size() < FLAGS_samples_num * FLAGS_test_percent)
         {
             cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
-            checkPoint(newPoint, gDataSet["test"].samplePoints, samplesPositionsMap, blue);
+            checkPointAndSetZ(newPoint, gDataSet["test"].samplePoints, gSamplesMap, blue);
         }
 
         // Generate train random points
         while (gDataSet["train"].samplePoints.size() < FLAGS_samples_num * (1 - FLAGS_test_percent))
         {
             cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
-            checkPoint(newPoint, gDataSet["train"].samplePoints, samplesPositionsMap, green);
+            checkPointAndSetZ(newPoint, gDataSet["train"].samplePoints, gSamplesMap, green);
         }
     }
     else
     {
 
 #ifdef ROUND_SAMPLING
-        float stepX = rad * 2 / FLAGS_grid_row_pts;
-        float stepY = rad * 2 / FLAGS_grid_row_pts;
+        float stepX = rad * 2 / FLAGS_grid;
+        float stepY = rad * 2 / FLAGS_grid;
 #else
-        float stepX = width / FLAGS_grid_row_pts;
-        float stepY = height / FLAGS_grid_row_pts;
+        float stepX = width / FLAGS_grid;
+        float stepY = height / FLAGS_grid;
 #endif
         DBG("stepX [" << stepX << "], stepY [" << stepY << "]");
 
         for (float x = xMin; x < xMax; x += stepX)
             for (float y = yMin; y < yMax; y += stepY)
-                checkPoint(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, samplesPositionsMap, green);
+                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, gSamplesMap, green);
 
-        float offsetX = stepX * FLAGS_grid_row_pts_test_offset;
-        float offsetY = stepY * FLAGS_grid_row_pts_test_offset;
+        float offsetX = stepX * FLAGS_grid_test_offset;
+        float offsetY = stepY * FLAGS_grid_test_offset;
         for (float x = xMin + offsetX; x < xMax - offsetX; x += stepX)
             for (float y = yMin + offsetY; y < yMax - offsetY; y += stepY)
-                checkPoint(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, samplesPositionsMap, blue);
+                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, gSamplesMap, blue);
     }
 
-    std::string samplesPositionsMapFilePath = FLAGS_output_dir + "samplesPositionsMap.png";
-    cv::imwrite("lastSamplesPositionsMap.png", samplesPositionsMap);
-    if (!cv::imwrite(samplesPositionsMapFilePath, samplesPositionsMap))
-        std::cout << "Failed saving samplesPositionsMap to [" << samplesPositionsMapFilePath << "]" << std::endl;
-
-    cv::resize(samplesPositionsMap, samplesPositionsMap, cv::Size(FLAGS_win_width, FLAGS_win_height));
-    imshowAndWait(samplesPositionsMap, 0, "samplesPositionsMap");
+    std::string samplesPositionsMapFilePath = FLAGS_output_dir + "gSamplesMap.png";
+    cv::imwrite("lastSamplesPositionsMap.png", gSamplesMap);
+    if (!cv::imwrite(samplesPositionsMapFilePath, gSamplesMap))
+        std::cout << "Failed saving gSamplesMap to [" << samplesPositionsMapFilePath << "]" << std::endl;
 
     DBG("training points [" << gDataSet["train"].samplePoints.size() << "], testing points [" <<
         gDataSet["test"].samplePoints.size() << "]");
@@ -2629,19 +2760,18 @@ std::string loadOutputDirFromCheckPoint()
 void autoNavigate()
 {
     static bool sIsTrain = true;
-    static unsigned sAutoNavigationIdx = 0;
     static int sExportsNum = 0;
     static int sSkipsNum = 0;
 
     if (FLAGS_resume_export)
     {
         std::string dummy;
-        loadCheckPoint(getFileName(FLAGS_model), dummy, sIsTrain, sAutoNavigationIdx, sExportsNum, sSkipsNum);
+        loadCheckPoint(getFileName(FLAGS_model), dummy, sIsTrain, gAutoNavigationIdx, sExportsNum, sSkipsNum);
         FLAGS_resume_export = false;
 
         // Pass sanity chech - few lines further...
         std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
-        xf = xfSamples[sAutoNavigationIdx - 1];
+        xf = xfSamples[gAutoNavigationIdx - 1];
         return; // Render this xf to screen
     }
 
@@ -2650,7 +2780,7 @@ void autoNavigate()
     std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
     std::vector<SamplePose> &samplesData = sIsTrain ? gDataSet["train"].samplesData : gDataSet["test"].samplesData;
 
-    if (!sAutoNavigationIdx)
+    if (!gAutoNavigationIdx)
     {
         makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
     }
@@ -2662,17 +2792,17 @@ void autoNavigate()
         // Take screen-shot of current pose and save the XF file in identical fileName
         std::stringstream ssDirName;
         ssDirName << FLAGS_output_dir << (sIsTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
-            samplesData[sAutoNavigationIdx - 1].x << "_" << samplesData[sAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
+            samplesData[gAutoNavigationIdx - 1].x << "_" << samplesData[gAutoNavigationIdx - 1].y << FS_DELIMITER_LINUX;
         makeDir(ssDirName.str());
 
         std::stringstream ssNum;
-        ssNum << std::setfill('0') << std::setw(6) << sAutoNavigationIdx - 1;
+        ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx - 1;
         std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
 
         if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
         {
             // Image is OK and was saved. Write also image data
-            samplesData[sAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
+            samplesData[gAutoNavigationIdx - 1].write(sampleFilePathNoExt + ".txt");
 
             xf.write(sampleFilePathNoExt + ".xf");
 
@@ -2684,28 +2814,28 @@ void autoNavigate()
         }
 
         // Sanity
-        if (xf != xfSamples[sAutoNavigationIdx - 1])
+        if (xf != xfSamples[gAutoNavigationIdx - 1])
         {
             throw std::runtime_error("Somehow the XF was modified before we returned here. This might suggest the "
                 "rendered image is not we think");
         }
     }
 
-    xf = xfSamples[sAutoNavigationIdx];
+    xf = xfSamples[gAutoNavigationIdx];
     //DBG("xf:\n" << xf);
 
-    if (FLAGS_debug || sAutoNavigationIdx % 1000 == 0)
+    if (FLAGS_debug || gAutoNavigationIdx % 1000 == 0)
     {
-        DBG("sample [#" << sAutoNavigationIdx << "/" << samplesData.size() << "], dataSet [" <<
+        DBG("sample [#" << gAutoNavigationIdx << "/" << samplesData.size() << "], dataSet [" <<
             (sIsTrain ? "Train" : "Test") << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum <<
-            "], samplesData [" << samplesData[sAutoNavigationIdx] << "]");
+            "], samplesData [" << samplesData[gAutoNavigationIdx] << "]");
 
-        saveCheckPoint(getFileName(FLAGS_model), FLAGS_output_dir, sIsTrain, sAutoNavigationIdx, sExportsNum,
+        saveCheckPoint(getFileName(FLAGS_model), FLAGS_output_dir, sIsTrain, gAutoNavigationIdx, sExportsNum,
             sSkipsNum);
     }
 
-    sAutoNavigationIdx++;
-    if (sAutoNavigationIdx == xfSamples.size())
+    gAutoNavigationIdx++;
+    if (gAutoNavigationIdx == xfSamples.size())
     {
         DBG("Done auto navigating over [" << (sIsTrain ? "train" : "test") << "] set. Projections num [" <<
             xfSamples.size() << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum << "]");
@@ -2719,7 +2849,7 @@ void autoNavigate()
             setAutoNavState(false);
         }
 
-        sAutoNavigationIdx = 0;
+        gAutoNavigationIdx = 0;
         sExportsNum = 0;
         sSkipsNum = 0;
     }
@@ -2756,6 +2886,28 @@ void initGoogleLogs(const std::string &appName)
     google::SetLogDestination(google::FATAL, "");
 
     google::InitGoogleLogging(appName.c_str());
+}
+
+void updateUpperMapShow()
+{
+    gUpperMapShow = gSamplesMap.clone();
+
+    trimesh::xform xfInv = inv(xf);
+    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
+    //DBG("xf\n" << xf);
+    //DBG("xfInv\n" << xfInv);
+
+    cv::circle(gUpperMapShow,
+        gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size()),
+        (gModelMap.cols/ FLAGS_win_width) * 8, azul, CV_FILLED);
+
+    cv::resize(gUpperMapShow, gUpperMapShow, cv::Size(FLAGS_win_width, FLAGS_win_height));
+
+    std::stringstream ss;
+    ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
+    myPutText(gUpperMapShow, ss, cv::Point(5, 10));
+
+    cv::imshow(UPPER_MAP_WINDOW_NAME, gUpperMapShow);
 }
 
 int main(int argc, char* argv[])
@@ -2807,7 +2959,8 @@ int main(int argc, char* argv[])
     //initWindow(CV_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawPhoto);
     //cv::setMouseCallback(CV_WINDOW_NAME, mouseTagCallbackFunc2D, NULL);
 
-    populateXfVector();
+    if (FLAGS_pose.empty())
+        populateXfVector();
 
     updateWindows();
     verifySize(MAIN_WINDOW_NAME);
@@ -2816,6 +2969,7 @@ int main(int argc, char* argv[])
 
     for (;;)
     {
+        updateUpperMapShow();
         updateWindows();
 
         int key = cv::waitKey(gAutoNavigation ? 5 : 0); //33);
