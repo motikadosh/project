@@ -1938,22 +1938,22 @@ trimesh::xform getXfFromPose(const SamplePose &ps)
         throw std::invalid_argument("Z and Roll are not supported");
 
     // Determine the x,y position
-    trimesh::xform xyzXf = trimesh::xform::trans(-ps.x, ps.y, ps.z) *
+    trimesh::xform xyzXf = trimesh::xform::trans(-ps.x, ps.y, -ps.z) *
         trimesh::xform::trans(-themesh->bsphere.center[0], -themesh->bsphere.center[1], 0);
-    DBG("xyzXf:\n" << xyzXf);
+    //DBG("xyzXf:\n" << xyzXf);
 
     // Base rotation so we will be looking horizontally
     xyzXf = getCamRotMatDeg(0.0, -90, 0.0) * xyzXf;
-    DBG("base rot:\n" << xyzXf);
+    //DBG("base rot:\n" << xyzXf);
 
     trimesh::xform yawXf = getCamRotMatDeg(ps.yaw, 0.0, 0.0);
     trimesh::xform pitchXf = getCamRotMatDeg(0.0, ps.pitch, 0.0);
-    DBG("yaw and pitch:\n" << yawXf << ", pitchXf:\n" << pitchXf);
+    //DBG("yaw and pitch:\n" << yawXf << ", pitchXf:\n" << pitchXf);
 
     trimesh::xform fullXf = pitchXf * yawXf * xyzXf;
 
-    DBG("SamplePose " << ps);
-    DBG("fullXf:\n" << fullXf);
+    //DBG("SamplePose " << ps);
+    //DBG("fullXf:\n" << fullXf);
 
     return fullXf;
 }
@@ -2161,6 +2161,7 @@ void handleNavKeyboard(int key)
         break;
 
     case '+':
+    case '=':
         xyzStep *= 2;
         DBG("Increased xyzStep to " << xyzStep);
         break;
@@ -2892,6 +2893,7 @@ void updateUpperMapShow()
 {
     gUpperMapShow = gSamplesMap.clone();
 
+    // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
     trimesh::xform xfInv = inv(xf);
     cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
     //DBG("xf\n" << xf);
