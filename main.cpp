@@ -71,12 +71,13 @@ DEFINE_double(test_percent, 0.2, "Test percent");
 DEFINE_int32(grid, 20, "Number of (x, y) pts to sample on each grid row in auto navigation, column is induced");
 DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
 DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
+DEFINE_bool(sample_pos_only, false, "No angle (yaw/pitch) sampling is made - for debugging");
 
 DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
 DEFINE_int32(min_edges_threshold, 4, "Minimum number of edges for sample exporting");
 DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage for sample exporting");
-DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
+//DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
 
 DEFINE_int32(win_width, 800, "Width of the main window");
 DEFINE_int32(win_height, 600, "Height of the main window");
@@ -1256,6 +1257,8 @@ void redrawFaces(void *userData)
     verifySize(FACES_WINDOW_NAME);
 
     cls();
+
+    camera = trimesh::GLCamera();
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
@@ -1269,10 +1272,19 @@ void redrawFaces(void *userData)
     DBG_T("Done");
 }
 
-void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
+void redrawEdges(void *userData)
 {
+    DBG_T("Entered");
+
+    //DrawData *data = static_cast<DrawData *>(userData);
+
+    verifySize(MAIN_WINDOW_NAME);
+
+    cls();
+
     //DBG(edges);
     //DBG("\n" << xf);
+    camera = trimesh::GLCamera();
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
@@ -1285,23 +1297,6 @@ void drawModel(trimesh::xform &xf, trimesh::GLCamera &camera)
     drawMarkedPoints();
 
     glPopMatrix(); // Don't forget to pop the Matrix
-}
-
-void redraw(void *userData)
-{
-    DBG_T("Entered");
-
-    //DrawData *data = static_cast<DrawData *>(userData);
-
-    verifySize(MAIN_WINDOW_NAME);
-
-    cls();
-    drawModel(xf, camera);
-
-    //glutSwapBuffers();
-    // void glRotated(GLdouble angle, GLdouble x, GLdouble y, GLdouble z);
-    // glRotate produces a rotation of angle degrees around the vector x y z.
-    //glRotated(0.6, 0, 1, 0);
 
     DBG_T("Done");
 }
@@ -2414,41 +2409,42 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
 void fillEachPointPoses(DataSet &dataSet)
 {
     float rollDeg = 0; // Currently no roll is added
-#if 1
+
     for (const cv::Point3f &p : dataSet.samplePoints)
     {
-        int anglesPerXY = 0;
-        for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
+        if (!FLAGS_sample_pos_only)
         {
-            // Negative pitch values are UP
-            for (float pitchDeg = 0;  pitchDeg >= -30; pitchDeg -= 5)
+            int anglesPerXY = 0;
+            for (float yawDeg = 0; yawDeg < 360; yawDeg += 5)
             {
-                SamplePose pose(p.x, p.y, p.z, yawDeg, pitchDeg, rollDeg);
+                // Negative pitch values are UP
+                for (float pitchDeg = 0;  pitchDeg >= -30; pitchDeg -= 5)
+                {
+                    SamplePose pose(p.x, p.y, p.z, yawDeg, pitchDeg, rollDeg);
 
-                trimesh::xform fullXf = getXfFromPose(pose);
+                    trimesh::xform fullXf = getXfFromPose(pose);
 
-                dataSet.xfSamples.push_back(fullXf);
-                dataSet.samplesData.push_back(pose);
+                    dataSet.xfSamples.push_back(fullXf);
+                    dataSet.samplesData.push_back(pose);
 
-                if (dataSet.samplesData.size() % 10000 == 0)
-                    DBG("Pose [#" << dataSet.samplesData.size() - 1 << "] example [" << pose << "], xf\n" << xf);
-                anglesPerXY++;
+                    if (dataSet.samplesData.size() % 10000 == 0)
+                        DBG("Pose [#" << dataSet.samplesData.size() - 1 << "] example [" << pose << "], xf\n" << xf);
+                    anglesPerXY++;
+                }
             }
+
+            //DBG("anglesPerXY [" << anglesPerXY << "]");
         }
+        else // No angles - good for debugging
+        {
+            SamplePose pose(p.x, p.y, p.z, 0, 0, rollDeg);
 
-        //DBG("anglesPerXY [" << anglesPerXY << "]");
+            trimesh::xform fullXf = getXfFromPose(pose);
+
+            dataSet.xfSamples.push_back(fullXf);
+            dataSet.samplesData.push_back(pose);
+        }
     }
-#else // No angles - good for debugging
-    for (const cv::Point3f &p : dataSet.samplePoints)
-    {
-        SamplePose pose(p.x, p.y, p.z, 0, 0, rollDeg);
-
-        trimesh::xform fullXf = getXfFromPose(pose);
-
-        dataSet.xfSamples.push_back(fullXf);
-        dataSet.samplesData.push_back(pose);
-    }
-#endif
 }
 
 void populateXfVector()
@@ -2947,7 +2943,7 @@ int main(int argc, char* argv[])
     loadModel(FLAGS_model);
     loadModelMap(FLAGS_model);
 
-    initWindow(MAIN_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redraw);
+    initWindow(MAIN_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawEdges);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
     initWindow(FACES_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawFaces);
     //initWindow(VERTEX_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawVertex);
