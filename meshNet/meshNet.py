@@ -4,6 +4,8 @@ from __future__ import division
 import time
 import os
 
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
+
 import numpy as np
 
 # Freeze seed - Must be called before import of Keras!
@@ -32,18 +34,21 @@ import consts
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
+data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
+#data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_grid50/'
+# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
 # data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-21_41_07-grid_40/'
 train_dir = os.path.join(data_dir, 'train')
 test_dir = None
 # test_dir = os.path.join(data_dir, 'test')
 
-weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
+weights_filename = '/home/arik/Desktop/moti/project/meshNet/sessions_outputs/meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5'
 
-
+render_to_screen = False
 test_only = False
-load_weights = True
-initial_epoch = 26
+load_weights = False
+initial_epoch = 0 # Should have the weights Epoch number + 1
 if test_only:
     load_weights = True
 
@@ -182,30 +187,33 @@ def detailed_evaluation(model, loader):
 
     max_xy_error = max(np.max(xy_error_test), np.max(xy_error_train))
 
-    # Plot 2d heatmap histograms of the errors
-    visualize.multiple_plots(1, 1, 2, 1)
-    visualize.plot_2d_hist(xy_error_test, angle_error_test, False, (50, 50), title='Test Err 2D Histogram',
-                           xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=False)
-    visualize.multiple_plots(1, 1, 2, 2)
-    visualize.plot_2d_hist(xy_error_train, angle_error_train, False, (50, 50), title='Train Err 2D Histogram',
-                           xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=True,
-                           save_path=os.path.join(plots_dir, train_2d_hist_fname))
+    try:
+        # Plot 2d heatmap histograms of the errors
+        visualize.multiple_plots(1, 1, 2, 1)
+        visualize.plot_2d_hist(xy_error_test, angle_error_test, False, (50, 50), title='Test Err 2D Histogram',
+                               xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=False)
+        visualize.multiple_plots(1, 1, 2, 2)
+        visualize.plot_2d_hist(xy_error_train, angle_error_train, False, (50, 50), title='Train Err 2D Histogram',
+                               xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180],
+                               show=render_to_screen, save_path=os.path.join(plots_dir, train_2d_hist_fname))
 
-    # Plot 1D histograms of the errors
-    visualize.multiple_plots(2, 2, 2, 1)
-    visualize.plot_hist(xy_error_train, False, 50, title='Train XY err(%s-samples)' % len(xy_error_train),
-                        ylabel='Samples', show=False)
-    visualize.multiple_plots(2, 2, 2, 2)
-    visualize.plot_hist(xy_error_test, False, 50, title='Test XY err(%s-samples)' % len(xy_error_test),
-                        ylabel='Samples', show=False)
+        # Plot 1D histograms of the errors
+        visualize.multiple_plots(2, 2, 2, 1)
+        visualize.plot_hist(xy_error_train, False, 50, title='Train XY err(%s-samples)' % len(xy_error_train),
+                            ylabel='Samples', show=False)
+        visualize.multiple_plots(2, 2, 2, 2)
+        visualize.plot_hist(xy_error_test, False, 50, title='Test XY err(%s-samples)' % len(xy_error_test),
+                            ylabel='Samples', show=False)
 
-    visualize.multiple_plots(2, 2, 2, 3)
-    visualize.plot_hist(angle_error_train, False, 50, title='Train angle err(%s-samples)' %
-                        len(angle_error_train), ylabel='Samples', show=False)
-    visualize.multiple_plots(2, 2, 2, 4)
-    visualize.plot_hist(angle_error_test, False, 50, title='Test angle err(%s-samples)' %
-                        len(angle_error_test), ylabel='Samples', show=True,
-                        save_path=os.path.join(plots_dir, hist_fname))
+        visualize.multiple_plots(2, 2, 2, 3)
+        visualize.plot_hist(angle_error_train, False, 50, title='Train angle err(%s-samples)' %
+                            len(angle_error_train), ylabel='Samples', show=False)
+        visualize.multiple_plots(2, 2, 2, 4)
+        visualize.plot_hist(angle_error_test, False, 50, title='Test angle err(%s-samples)' %
+                            len(angle_error_test), ylabel='Samples', show=render_to_screen,
+                            save_path=os.path.join(plots_dir, hist_fname))
+    except Exception as e:
+        print("Warning: {}".format(e))
 
 
 def main():
@@ -223,7 +231,7 @@ def main():
                     train_dir=train_dir,
                     test_dir=test_dir,
                     x_range=(0, 1),
-                    directional_gauss_blur=15,
+                    directional_gauss_blur=None,
                     part_of_data=part_of_data)
 
     # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
@@ -257,7 +265,8 @@ def main():
     if not test_only:
         print("Training model...")
         # Saves the model weights after each epoch if the validation loss decreased
-        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only, tensor_board=False)
+        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
+                                                 tensor_board=False)
 
         history = model.fit(loader.x_train, [loader.y_train[:, 0:2], loader.y_train[:, 2:4],
                                              loader.y_train[:, 0:2], loader.y_train[:, 2:4],
@@ -268,24 +277,25 @@ def main():
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4]]),
                             shuffle=True, initial_epoch=initial_epoch)
-        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
-        #                     validation_data = (loader.x_test, loader.y_test), shuffle = True)
+        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch,
+        # callbacks=callbacks, validation_data = (loader.x_test, loader.y_test), shuffle = True)
     else:
         history = None
 
     # TODO: Run test and detailed EVAL on best EPOCH - Minimum val loss
     test_score = model.evaluate(loader.x_test, [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4]], batch_size=1, verbose=0)
+                                loader.y_test[:, 0:2], loader.y_test[:, 2:4],
+                                loader.y_test[:, 0:2], loader.y_test[:, 2:4]], batch_size=1, verbose=0)
     # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=1, verbose=0)
     print('Test score:', test_score)
 
     loader.save_pickle(sess_info)
 
-    if history:
-        visualize.visualize_history(history, sess_info)
-
     detailed_evaluation(model, loader)
+
+    if history:
+        visualize.visualize_history(history, sess_info, render_to_screen)
+
 
 if __name__ == '__main__':
     main()

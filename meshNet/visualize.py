@@ -206,7 +206,7 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
         # cv2.destroyWindow(title)
 
 
-def visualize_history(history, sess_info):
+def visualize_history(history, sess_info, render_to_screen=True):
     try:
         print("History results-")
         for d in history.history:
@@ -241,7 +241,8 @@ def visualize_history(history, sess_info):
         history_plot_full_path = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, history_plot_fname)
         plt.savefig(history_plot_full_path)
 
-        plt.show()
+        if render_to_screen:
+            plt.show()
     except Exception as e:
         print("Warning: {}".format(e))
 
