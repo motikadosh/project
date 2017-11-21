@@ -34,7 +34,7 @@ else
     OPENCV_INC = /usr/local/include
 endif
 
-TRIMESH_DIR = /home/moti/cg/trimesh2
+TRIMESH_DIR = ../trimesh2
 TRIMESH_LIB = $(TRIMESH_DIR)/lib.Linux64
 
 C_INC = \
@@ -45,13 +45,11 @@ C_INC = \
     -I$(DLIB_DIR) \
     -I$(TOPDIR)/external/cereal/include \
     -I$(INC_DIR)/eigen3 \
-    -I$(INC_DIR)/gtk-2.0 \
     -I$(INC_DIR)/glib-2.0 \
     -I$(INC_DIR)/cairo \
     -I$(INC_DIR)/pango-1.0 \
     -I$(INC_DIR)/gdk-pixbuf-2.0 \
     -I$(INC_DIR)/atk-1.0 \
-    -I$(ARCH_LIB_DIR)/gtk-2.0/include \
     -I$(ARCH_LIB_DIR)/glib-2.0/include \
     -I$(TRIMESH_DIR)/include
 
@@ -96,7 +94,6 @@ C_FLAGS += -DBOOST_ALL_DYN_LINK -DBOOST_LOG_USE_NATIVE_SYSLOG \
 CXX_FLAGS = $(C_FLAGS) -std=c++11
 
 L_FLAGS = $(OPENCV_LFLAGS) \
-    -lmysqlcppconn \
     -lpthread \
     -lX11 \
     -lboost_serialization \
@@ -106,10 +103,7 @@ L_FLAGS = $(OPENCV_LFLAGS) \
     -lboost_log \
     -lboost_log_setup \
     -lboost_thread \
-    -lgtk-x11-2.0 \
-    -lgdk-x11-2.0 \
     -lglog \
-    -ltbb \
     -lgflags \
     -lGL -lGLU \
     -L$(TRIMESH_LIB) -ltrimesh -lgluit -fopenmp
