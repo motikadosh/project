@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 import consts
 import utils
 
-USE_OPENCV=False
+USE_OPENCV = False
 
 
 def imshow(win_title, img):
@@ -188,7 +188,7 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
                     cur_img = cv2.cvtColor(cur_img, cv2.COLOR_GRAY2RGB)
                 images[row * img_rows + row*border_size:row * img_rows + img_rows + row*border_size, col * img_cols + col*border_size:col * img_cols + img_cols + col*border_size, :] = cur_img
 
-        current_images = str(offset) + "-" + str(offset + v_axis_num * h_axis_num - 1)
+        current_images = str(offset) + "-" + str(offset + v_axis_num * h_axis_num - 1) + "_of_" + str(x.shape[0])
         title = "show_data_" + current_images
         # cv2.namedWindow(title)
         # cv2.moveWindow(title, 50, 50)
