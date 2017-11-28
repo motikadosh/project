@@ -274,12 +274,16 @@ class DataLoader:
         return self.min_max_scale(x.astype(np.float32), self.x_range, IMAGE_RANGE)
 
     def y_inverse_transform(self, y):
+        if y.ndim == 1:
+            y = np.expand_dims(y, axis=0)
+
         y_new = np.zeros_like(y)
+
         for i in xrange(2):
             y_new[:, i] = DataLoader.min_max_scale(y[:, i], self.y_range, (self.y_min_max[0][i], self.y_min_max[1][i]))
 
         y_new[:, 2:] = y[:, 2:] * 360
-        return y_new
+        return y_new.squeeze()
 
     @staticmethod
     def unison_shuffled_copies(x, y, file_urls):
@@ -311,7 +315,7 @@ class DataLoader:
 
         utils.save_pickle(sess_info, data)
 
-    def load_pickle(self, pickle_full_path):
+    def load_pickle(self, pickle_full_path, part_of_data=part_of_data):
         data = utils.load_pickle(pickle_full_path)
 
         print("session title: %s" % data['sess_title'])
@@ -332,6 +336,16 @@ class DataLoader:
         self.y_min_max = data['y_min_max']
 
         self.directional_gauss_blur = data['directional_gauss_blur']
+
+        print("Validating path...")
+        if os.path.expanduser('~') == '/home/moti':
+            print("Changing files path...")
+            self.file_urls_train = np.array([s.replace('arik/Desktop/moti', 'moti/cg') for s in self.file_urls_train])
+            self.file_urls_test = np.array([s.replace('arik/Desktop/moti', 'moti/cg') for s in self.file_urls_test])
+
+        # Handle part of data
+        self.y_train, self.y_test, self.file_urls_train, self.file_urls_test = \
+            utils.part_of(part_of_data, self.y_train, self.y_test, self.file_urls_train, self.file_urls_test)
 
         print("Loading images...")
 

@@ -24,11 +24,13 @@ def imshow(win_title, img):
         return key
     else:
         # rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB
-
-        rgb = np.zeros_like(img)
-        rgb[:, :, 0] = img[:, :, 2]
-        rgb[:, :, 1] = img[:, :, 1]
-        rgb[:, :, 2] = img[:, :, 0]
+        if len(img.shape) == 3 and img.shape[2] == 3:
+            rgb = np.zeros_like(img)
+            rgb[:, :, 0] = img[:, :, 2]
+            rgb[:, :, 1] = img[:, :, 1]
+            rgb[:, :, 2] = img[:, :, 0]
+        else:
+            rgb = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
         plt.title(win_title)
         plt.imshow(rgb)
@@ -210,7 +212,7 @@ def visualize_history(history, sess_info, render_to_screen=True):
     try:
         print("History results-")
         for d in history.history:
-            print("%s - %s" % (d, history.history[d]))
+            print("%s = %s" % (d, history.history[d]))
 
         target_names = ['training-set', 'validation-set']
         fig = plt.figure()

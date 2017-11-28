@@ -24,6 +24,22 @@ class SessionInfo:
             self.out_dir = out_dir
 
 
+def part_of(part, *arrays):
+    """This function assumes all arrays have identical length."""
+
+    if len(arrays) == 0:
+        raise Exception("No arrays passed")
+
+    if part <= 0:
+        raise Exception("Part argument cannot be <= 0")
+
+    print("Handling part of data...")
+    if part <= 1.0:
+        part = int(len(arrays[0]) * part)
+
+    return tuple([array[:part] for array in arrays])
+
+
 def mkdirs(full_path):
     """Create all directories in the given path if they does not exist"""
 
@@ -43,6 +59,18 @@ def cd(new_dir):
         yield
     finally:
         os.chdir(prev_dir)
+
+
+# import os, shutil
+def rm_files(base_dir):
+    for cur_file in os.listdir(base_dir):
+        file_path = os.path.join(base_dir, cur_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+            #elif os.path.isdir(file_path): shutil.rmtree(file_path)
+        except Exception as e:
+            print(e)
 
 
 def load_pickle(pickle_full_path):
