@@ -13,6 +13,7 @@ from keras.models import Model
 from keras.optimizers import Adam
 import tensorflow as tf
 import numpy as np
+
 # import h5py
 # import math
 
@@ -46,19 +47,51 @@ def cyclic_loss_1(y_true, y_pred):
     lcyc = K.minimum(K.square(y_pred - y_true),
                      K.minimum(K.square(y_pred - y_true + 1),
                      K.square(y_pred - y_true - 1)))
-    return 1.0 * lcyc
+    return (0.3) * lcyc
 
 def cyclic_loss_2(y_true, y_pred):
     lcyc = K.minimum(K.square(y_pred - y_true),
                      K.minimum(K.square(y_pred - y_true + 1),
                      K.square(y_pred - y_true - 1)))
-    return 1.0 * lcyc
+    return (0.3) * lcyc
 
 def cyclic_loss_3(y_true, y_pred):
     lcyc = K.minimum(K.square(y_pred - y_true),
                      K.minimum(K.square(y_pred - y_true + 1),
                      K.square(y_pred - y_true - 1)))
-    return 1.0 * lcyc
+    return (1.0) * lcyc
+
+
+def my_print_tensor(x, message=''):
+    import tensorflow as tf
+    return tf.Print(x, [x], message, summarize=1024)
+
+# Debug
+#def cyclic_loss_3(y_true, y_pred):
+#
+#    y_true_dbg = my_print_tensor(y_true, 'y_true')
+#    y_pred_dbg = my_print_tensor(y_pred, 'y_pred')
+#    # y_pred_dbg = K.print_tensor(y_pred, 'y_pred')
+#
+#    a = K.square(y_pred_dbg - y_true_dbg)
+#    b = K.square(y_pred_dbg - y_true_dbg + 1)
+#    c = K.square(y_pred_dbg - y_true_dbg - 1)
+#
+#    a_dbg = my_print_tensor(a, 'a')
+#    b_dbg = my_print_tensor(b, 'b')
+#    c_dbg = my_print_tensor(c, 'c')
+#
+#    min_bc = K.minimum(b_dbg, c_dbg)
+#    min_bc_dbg = my_print_tensor(min_bc, 'min_bc')
+#
+#    min_abc = K.minimum(a_dbg, min_bc_dbg)
+#    min_abc_dbg = my_print_tensor(min_abc, 'min_abc')
+#
+#    lcyc = min_abc_dbg
+#
+#    lcyc_dbg = my_print_tensor(lcyc, 'lcyc')
+#
+#    return (1.0) * lcyc_dbg
 
 
 def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weights_path=None,
