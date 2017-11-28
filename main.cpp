@@ -274,6 +274,8 @@ struct SamplePose {
         x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
     SamplePose(const std::string &poseStr)
     {
+        DBG("Entered. poseStr [" << poseStr << "]");
+
         std::vector<std::string> pose = split(poseStr);
         if (pose.size() != 6)
         {
@@ -1352,20 +1354,47 @@ void redrawPhoto(void *userData)
     DBG_T("Done");
 }
 
+bool getPointZ(const cv::Point3f &p, cv::Point3f &pWithZ);
+trimesh::xform getXfFromPose(const SamplePose &ps);
+
 // Set the view to look at the middle of the mesh, from reasonably far away or use xfFile if available
 void resetView()
 {
     DBG_T("Entered");
 
-    if (xf.read(xfFileName))
+    if (FLAGS_pose.empty())
     {
-        DBG("Reset view from " << xfFileName);
+        if (xf.read(xfFileName))
+        {
+            DBG("Reset view from " << xfFileName);
+        }
+        else
+        {
+            DBG("Reset view to look at the middle of the mesh, from reasonably far away");
+            xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
+                trimesh::xform::trans(-themesh->bsphere.center);
+        }
     }
     else
     {
-        DBG("Reset view to look at the middle of the mesh, from reasonably far away");
-        xf = trimesh::xform::trans(0, 0, -3.5f / fov * themesh->bsphere.r) *
-            trimesh::xform::trans(-themesh->bsphere.center);
+        DBG("Reset view from pose flag" << FLAGS_pose);
+
+        SamplePose samplePose(FLAGS_pose);
+        if (samplePose.z == 9999)
+        {
+            DBG("Getting Z (Height) coordinate...");
+            cv::Point3f pWithZ;
+            if (!getPointZ(cv::Point3f(samplePose.x, samplePose.y, 0), pWithZ))
+            {
+                DBG("Invalid point. Exiting...");
+                throw std::runtime_error("Invalid point. Exiting...");
+            }
+
+            DBG("Updaing sample pose Z (Height ) to [" << pWithZ.z << "]");
+            samplePose.z = pWithZ.z;
+        }
+
+        xf = getXfFromPose(samplePose);
     }
 }
 
@@ -1979,30 +2008,22 @@ void loadModel(const std::string &fileName)
     DBG("Vertices num [" << themesh->vertices.size() << "], faces num [" << themesh->faces.size() <<
         "], tstrips num [" << themesh->tstrips.size() << "], normals num [" << themesh->normals.size() << "]");
 
-
-    if (FLAGS_pose.empty())
-    {
-        // Generate xf file name from fileName
-        xfFileName = trimesh::xfname(fileName);
-        DBG("xfFileName: " << xfFileName);
-        resetView();
-    }
-    else
-    {
-        xf = getXfFromPose(SamplePose(FLAGS_pose));
-    }
+    // Generate xf file name from fileName
+    xfFileName = trimesh::xfname(fileName);
+    DBG("xfFileName: " << xfFileName);
+    resetView();
 }
 
 void loadModelMap(const std::string &modelFile)
 {
-    std::string prefix = getFileNameNoExt(modelFile);
+    std::string prefix = getDirName(getRunningExeFilePath()) + FS_DELIMITER_LINUX + getFileNameNoExt(modelFile);
 
     std::string mapFileName =  prefix + "_map.png";
     gModelMap = cv::imread(mapFileName);
     if (gModelMap.empty())
     {
-        throw std::runtime_error("Failed loading map");
         std::cout << "Failed loading map " << mapFileName << std::cout;
+        throw std::runtime_error("Failed loading map");
         return;
     }
 
@@ -2372,6 +2393,26 @@ void handleKeyboard(int key)
         handleTagKeyboard(key);
         break;
     }
+}
+
+bool getPointZ(const cv::Point3f &p, cv::Point3f &pWithZ)
+{
+    cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
+
+    if (mapPoint.x < 0 || mapPoint.x >= gModelMap.cols || mapPoint.y < 0 || mapPoint.y >= gModelMap.rows)
+    {
+        DBG("P is out of map area. Skipping");
+        return false;
+    }
+
+    if (gGroundLevelMap.at<char>(mapPoint.y, mapPoint.x) == 255)
+    {
+        DBG("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " unknown ground level");
+        return false;
+    }
+
+    pWithZ = cv::Point3f(p.x, p.y, gGroundLevelMap.at<char>(mapPoint.y, mapPoint.x) + FLAGS_camera_height);
+    return true;
 }
 
 void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv::Mat &colorMap,
@@ -2940,8 +2981,8 @@ int main(int argc, char* argv[])
     //mapFile = "data/berlin_google_map.png";
     //markedPtsFile = "data/markedPoints.txt";
 
-    loadModel(FLAGS_model);
     loadModelMap(FLAGS_model);
+    loadModel(FLAGS_model);
 
     initWindow(MAIN_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawEdges);
     cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
