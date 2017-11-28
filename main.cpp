@@ -72,6 +72,7 @@ DEFINE_int32(grid, 20, "Number of (x, y) pts to sample on each grid row in auto 
 DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
 DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
 DEFINE_bool(sample_pos_only, false, "No angle (yaw/pitch) sampling is made - for debugging");
+DEFINE_string(sample_rect, "", "Rect in map dimentions to perform sampling on. Format: \"x y width height\"");
 
 DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
@@ -256,17 +257,40 @@ cv::Mat projMat;
 
 int marksRadius = 4;
 
-std::vector<std::string> split(const std::string &s, char delim = ' ')
+std::vector<std::string> split(const std::string &str, const std::string &delims = " ,;")
 {
-    std::stringstream ss(s);
-    std::string item;
-    std::vector<std::string> elems;
-    while (std::getline(ss, item, delim))
+    std::vector<std::string> wordVector;
+    std::stringstream ss(str);
+    std::string line;
+    while(std::getline(ss, line))
     {
-        elems.push_back(std::move(item));
+        std::size_t prev = 0, pos;
+        while ((pos = line.find_first_of(delims, prev)) != std::string::npos)
+        {
+            if (pos > prev)
+                wordVector.push_back(line.substr(prev, pos - prev));
+            prev = pos + 1;
+        }
+
+        if (prev < line.length())
+            wordVector.push_back(line.substr(prev, std::string::npos));
     }
 
-    return elems;
+    return wordVector;
+}
+
+cv::Rect parseRectStr(const std::string &rectStr)
+{
+    std::vector<std::string> rectElements = split(rectStr);
+    if (rectElements.size() != 4)
+    {
+        DBG("Invalid -rect (x y width height) [" << rectStr << "]");
+        throw std::invalid_argument("Invalid rect string");
+    }
+
+    cv::Rect rect(std::stof(rectElements[0]), std::stof(rectElements[1]),
+        std::stof(rectElements[2]), std::stof(rectElements[3]));
+    return rect;
 }
 
 struct SamplePose {
@@ -2420,9 +2444,17 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
 {
     cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
 
-    if (mapPoint.x < 0 || mapPoint.x >= gModelMap.cols || mapPoint.y < 0 || mapPoint.y >= gModelMap.rows)
+    cv::Rect sampleROI = cv::Rect(cv::Point(), gModelMap.size()); // Entire map
+    if (!FLAGS_sample_rect.empty())
     {
-        DBG_T("P is out of map area. Skipping");
+        sampleROI = parseRectStr(FLAGS_sample_rect); // User ROI
+        float thicknessFactor = gModelMap.cols / 800;
+        cv::rectangle(colorMap, sampleROI, green, 1 * thicknessFactor);
+    }
+
+    if (!sampleROI.contains(mapPoint))
+    {
+        DBG_T("P is out of map ROI. Skipping");
         return;
     }
 
@@ -2735,7 +2767,7 @@ void saveCheckPoint(const std::string &modelFileName, const std::string &outDir,
     std::ofstream outputFile(checkPointFile);
     if (!outputFile.is_open())
     {
-        DBG("Failed opening " << checkPointFile);
+        DBG("Failed opening [" << checkPointFile << "]");
         return;
     }
 
