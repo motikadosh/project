@@ -4,7 +4,7 @@ from __future__ import division
 import time
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import numpy as np
 
@@ -34,8 +34,9 @@ import consts
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
-#data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_grid50/'
+data_dir = '/home/moti/cg/project/sessions_outputs/berlin_many_angels_few_xys/-1520.15_1422.77/'
+# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
+# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_grid50/'
 # data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
 # data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-21_41_07-grid_40/'
 train_dir = os.path.join(data_dir, 'train')
@@ -43,24 +44,26 @@ test_dir = None
 # test_dir = os.path.join(data_dir, 'test')
 
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
-weights_filename = '/home/arik/Desktop/moti/project/meshNet/sessions_outputs/meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5'
+# weights_filename = '/home/arik/Desktop/moti/project/meshNet/sessions_outputs/meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5'
+weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5'
+
 
 render_to_screen = False
 test_only = False
 load_weights = False
-initial_epoch = 0 # Should have the weights Epoch number + 1
+initial_epoch = 0  # Should have the weights Epoch number + 1
 if test_only:
     load_weights = True
 
 # Training options
-batch_size = 32
+batch_size = 64
 save_best_only = True
 
 debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    nb_epoch = 30
+    nb_epoch = 60
 elif debug_level == 1:  # Medium Debug
     part_of_data = 0.3
     nb_epoch = 15
@@ -155,6 +158,17 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
     return xy_error, xy_error_mean, xy_error_std, angle_error, angle_error_mean, angle_error_std
 
 
+def see_view(loader, x, y, idx):
+    visualize.imshow("see_view", x[idx])
+
+    pose = loader.y_inverse_transform(y[idx])
+    view_str = "%f %f %f %f %f %f" % (pose[0], pose[1], 9999, pose[2], pose[3], 0)
+    print("Calling PROJECT with pose %s" % view_str)
+
+    from subprocess import call
+    call(['../project', '../../berlin/berlin.obj', '-pose=' + view_str])
+
+
 def detailed_evaluation(model, loader):
     print("detailed evaluation...")
 
@@ -224,7 +238,7 @@ def main():
         pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
                                         sess_info.title + '.pkl')
         loader = meshNet_loader.DataLoader()
-        loader.load_pickle(pickle_full_path)
+        loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
     else:
         loader = meshNet_loader.DataLoader()
         loader.load(sess_info.title,
@@ -252,14 +266,15 @@ def main():
     model, model_name = posenet.posenet_train(**params)
 
     print("Model name: %s " % model_name)
-    print("Model function input arguments:")
-    print(params)
+    print("Model function input arguments:", params)
+    print("Batch size: %i" % batch_size)
 
     if load_weights:
         meshNet_model.load_model_weights(model, weights_filename)
 
     print("Model params number: %d " % model.count_params())
     print("Model loss type: %s " % model.loss)
+    model.summary()
     print("")
 
     if not test_only:
@@ -279,6 +294,8 @@ def main():
                             shuffle=True, initial_epoch=initial_epoch)
         # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch,
         # callbacks=callbacks, validation_data = (loader.x_test, loader.y_test), shuffle = True)
+
+        meshNet_model.load_best_weights(model, sess_info)
     else:
         history = None
 
@@ -289,7 +306,8 @@ def main():
     # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=1, verbose=0)
     print('Test score:', test_score)
 
-    loader.save_pickle(sess_info)
+    if not test_only:
+        loader.save_pickle(sess_info)
 
     detailed_evaluation(model, loader)
 

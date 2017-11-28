@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import numpy as np
 from keras.engine import Input
@@ -8,7 +9,7 @@ from keras.layers.advanced_activations import PReLU
 from keras.models import Sequential, Model
 from keras.optimizers import SGD, adadelta, Adam, RMSprop
 from keras.regularizers import l2
-from keras.callbacks import ModelCheckpoint, TensorBoard
+from keras.callbacks import Callback, ModelCheckpoint, TensorBoard
 
 from keras import backend as K
 
@@ -29,6 +30,128 @@ def load_model_weights(model, weights_full_path):
     model.load_weights(weights_full_path)
 
 
+# Assumes best model is last saved model (save_best_model parameter of ModelCheckpoint)
+def load_best_weights(model, sess_info):
+    hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
+    weights_list = os.listdir(hdf5_dir)
+    weights_list.sort(reverse=True)
+
+    weights_full_path = os.path.join(hdf5_dir, weights_list[0])
+    print("Loading best weights: " + weights_full_path)
+    load_model_weights(model, weights_full_path)
+
+
+# Some modifications to Keras ModelCheckpoint, currently mainly to save disk space
+class myModelCheckpoint(Callback):
+    """Save the model after every epoch.
+
+    `filepath` can contain named formatting options,
+    which will be filled the value of `epoch` and
+    keys in `logs` (passed in `on_epoch_end`).
+
+    For example: if `filepath` is `weights.{epoch:02d}-{val_loss:.2f}.hdf5`,
+    then the model checkpoints will be saved with the epoch number and
+    the validation loss in the filename.
+
+    # Arguments
+        filepath: string, path to save the model file.
+        monitor: quantity to monitor.
+        verbose: verbosity mode, 0 or 1.
+        save_best_only: if `save_best_only=True`,
+            the latest best model according to
+            the quantity monitored will not be overwritten.
+        mode: one of {auto, min, max}.
+            If `save_best_only=True`, the decision
+            to overwrite the current save file is made
+            based on either the maximization or the
+            minimization of the monitored quantity. For `val_acc`,
+            this should be `max`, for `val_loss` this should
+            be `min`, etc. In `auto` mode, the direction is
+            automatically inferred from the name of the monitored quantity.
+        save_weights_only: if True, then only the model's weights will be
+            saved (`model.save_weights(filepath)`), else the full model
+            is saved (`model.save(filepath)`).
+        period: Interval (number of epochs) between checkpoints.
+    """
+
+    def __init__(self, filepath, monitor='val_loss', verbose=0,
+                 save_best_only=False, save_weights_only=False,
+                 mode='auto', period=1, remove_last_best=True):
+        super(myModelCheckpoint, self).__init__()
+        self.monitor = monitor
+        self.verbose = verbose
+        self.filepath = filepath
+        self.save_best_only = save_best_only
+        self.save_weights_only = save_weights_only
+        self.period = period
+        self.epochs_since_last_save = 0
+        self.remove_last_best = remove_last_best
+        self.best_filepath = None
+
+        if mode not in ['auto', 'min', 'max']:
+            warnings.warn('ModelCheckpoint mode %s is unknown, '
+                          'fallback to auto mode.' % (mode),
+                          RuntimeWarning)
+            mode = 'auto'
+
+        if mode == 'min':
+            self.monitor_op = np.less
+            self.best = np.Inf
+        elif mode == 'max':
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+        else:
+            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
+                self.monitor_op = np.greater
+                self.best = -np.Inf
+            else:
+                self.monitor_op = np.less
+                self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        self.epochs_since_last_save += 1
+        if self.epochs_since_last_save >= self.period:
+            self.epochs_since_last_save = 0
+            filepath = self.filepath.format(epoch=epoch, **logs)
+            if self.save_best_only:
+                current = logs.get(self.monitor)
+                if current is None:
+                    warnings.warn('Can save best model only with %s available, '
+                                  'skipping.' % (self.monitor), RuntimeWarning)
+                else:
+                    if self.monitor_op(current, self.best):
+                        if self.verbose > 0:
+                            print('Epoch %05d: %s improved from %0.5f to %0.5f,'
+                                  ' saving model to %s'
+                                  % (epoch, self.monitor, self.best,
+                                     current, filepath))
+                        self.best = current
+
+                        if self.remove_last_best:
+                            if self.best_filepath is not None:
+                                if self.verbose > 0:
+                                    print("Removing ", self.best_filepath)
+                                os.unlink(self.best_filepath)
+                            self.best_filepath = filepath
+
+                        if self.save_weights_only:
+                            self.model.save_weights(filepath, overwrite=True)
+                        else:
+                            self.model.save(filepath, overwrite=True)
+                    else:
+                        if self.verbose > 0:
+                            print('Epoch %05d: %s did not improve' %
+                                  (epoch, self.monitor))
+            else:
+                if self.verbose > 0:
+                    print('Epoch %05d: saving model to %s' % (epoch, filepath))
+                if self.save_weights_only:
+                    self.model.save_weights(filepath, overwrite=True)
+                else:
+                    self.model.save(filepath, overwrite=True)
+
+
 def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_board=False):
     hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
     utils.mkdirs(hdf5_dir)
@@ -47,12 +170,13 @@ def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_boa
         extra_params = "_vacc{val_acc:.3f}"
     else:
         monitor = "val_loss"
+        # monitor = "loss"
         extra_params = ""
 
-    hdf5_fname = sess_info.title + "_weights.e{epoch:03d}-vloss{val_loss:.4f}" + extra_params + ".hdf5"
+    hdf5_fname = sess_info.title + "_weights.e{epoch:03d}-loss{loss:.5f}-vloss{val_loss:.4f}" + extra_params + ".hdf5"
     hdf5_full_path = os.path.join(hdf5_dir, hdf5_fname)
 
-    model_cp = ModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only, monitor=monitor)
+    model_cp = myModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only, monitor=monitor)
     if tensor_board:
         return [model_cp, tensor_board_cp]
     else:
