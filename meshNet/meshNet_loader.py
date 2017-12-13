@@ -182,7 +182,7 @@ class DataLoader:
     directional_gauss_blur = None
 
     # TODO: Merge load() and load_pickle() to use same code
-    def load(self, sess_title, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(-0.5, 0.5), y_range=(0, 1),
+    def load(self, sess_title, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(0, 1), y_range=(0, 1),
              directional_gauss_blur=None, part_of_data=1.0):
 
         if part_of_data <= 0 or part_of_data > 1 and part_of_data - np.floor(part_of_data) != 0:
@@ -224,7 +224,8 @@ class DataLoader:
         # import visualize
         # visualize.show_data(x_test, border_size=1, bg_color=(0, 255, 0))
 
-        print("Done DataLoader init. Total samples number: %s" % (self.x_train.shape[0] + self.x_test.shape[0]))
+        print("Done DataLoader init. Samples number (train, test): (%s, %s)" %
+              (self.x_train.shape[0], self.x_test.shape[0]))
 
     def process_data(self, x, y, file_urls):
         print("Normalizing data...")
@@ -247,12 +248,13 @@ class DataLoader:
         # Yaw, Pitch - convert negative angles to 0-360, then take to range [0, 1]
         y[:, 2:] = ((y[:, 2:] + 360) % 360) / 360.0
 
-        x = x.astype(np.float32)
         x = DataLoader.min_max_scale(x, IMAGE_RANGE, x_range)
         return x, y
 
     @staticmethod
     def min_max_scale(x, old_range, new_range):
+        x = x.astype(np.float32)
+
         old_span = float(old_range[1]) - float(old_range[0])
         new_span = float(new_range[1]) - float(new_range[0])
 
@@ -271,7 +273,7 @@ class DataLoader:
         return new_x
 
     def x_inverse_transform(self, x):
-        return self.min_max_scale(x.astype(np.float32), self.x_range, IMAGE_RANGE)
+        return self.min_max_scale(x, self.x_range, IMAGE_RANGE)
 
     def y_inverse_transform(self, y):
         if y.ndim == 1:
@@ -282,7 +284,7 @@ class DataLoader:
         for i in xrange(2):
             y_new[:, i] = DataLoader.min_max_scale(y[:, i], self.y_range, (self.y_min_max[0][i], self.y_min_max[1][i]))
 
-        y_new[:, 2:] = y[:, 2:] * 360
+        y_new[:, 2:] = (y[:, 2:] * 360) % 360
         return y_new.squeeze()
 
     @staticmethod
@@ -355,8 +357,7 @@ class DataLoader:
             for cnt, fname in enumerate(image_files):
                 images[cnt, :, :, 0] = load_image(fname, image_size)
                 if cnt % 100 == 0:
-                    print("Loaded " + str(cnt) + "/" + str(len(image_files)) + " images")
-
+                    print("Loaded [%s/%s] images" % (cnt, len(image_files)))
             return images
 
         self.x_train = load_image_files(self.file_urls_train, self.image_size)
@@ -366,9 +367,7 @@ class DataLoader:
                                          self.image_size)
         self.x_test = images_preprocess(self.x_test, self.directional_gauss_blur, self.file_urls_test, self.image_size)
 
-        self.x_train = self.x_train.astype(np.float32)
         self.x_train = DataLoader.min_max_scale(self.x_train, IMAGE_RANGE, self.x_range)
-        self.x_test = self.x_test.astype(np.float32)
         self.x_test = DataLoader.min_max_scale(self.x_test, IMAGE_RANGE, self.x_range)
 
 
@@ -376,14 +375,18 @@ class DataLoader:
 def main():
     print("Loading images and labels")
 
-    data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
+    data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800/'
     train_dir = os.path.join(data_dir, 'train')
-    test_dir = os.path.join(data_dir, 'test')
+    test_dir = None
+    # test_dir = os.path.join(data_dir, 'test')
 
-    loader = DataLoader('temp_title',
-                        train_dir=train_dir,
-                        test_dir=test_dir,
-                        x_range=(0, 1), directional_gauss_blur=15, part_of_data=1.0)
+    loader = DataLoader()
+    loader.load('meshNet',
+                train_dir=train_dir,
+                test_dir=test_dir,
+                x_range=(0, 1),
+                directional_gauss_blur=None,
+                part_of_data=1.0)
 
     # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 

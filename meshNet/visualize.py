@@ -103,6 +103,118 @@ def plot_line(x, title='Line', ylabel=None, show=True):
     return plt
 
 
+def render_view(pose):
+    view_str = "%f %f %f %f %f %f" % (pose[0], pose[1], 9999, pose[2], pose[3], 0)
+
+    print("Calling PROJECT with pose %s" % view_str)
+
+    from subprocess import call
+    file_path = '/home/moti/cg/project/meshNet/lastEdgeView.png'
+    call(['../project', '../../berlin/berlin.obj', '-single=' + file_path, '-output_dir=temp', '-pose=' + view_str])
+    img = cv2.imread(file_path)
+    # utils.rm_file(file_path)
+    return img
+
+
+class OrthoData:
+    def __init__(self, data_dir):
+        self.filepath = os.path.join(data_dir, 'map_ortho_data.txt')
+
+        self.left, self.right, self.bottom, self.top, self.neardist, self.fardist = self.read()
+
+    def read(self):
+        with open(self.filepath) as f:
+            line = f.readline()
+
+        ortho_data_str = line[line.find('=(') + 2:len(line) - 1]
+
+        ortho_data_list = []
+        for num in ortho_data_str.split(','):
+            ortho_data_list.append(float(num))
+
+        return tuple(ortho_data_list)
+
+    def convert_world_point_to_map(self, p, map_shape):
+        map_x = (p[0] - self.left) / (self.right - self.left) * map_shape[1]
+        map_y = (p[1] - self.bottom) / (self.top - self.bottom) * map_shape[0]
+
+        return int(round(map_x)), int(round(map_y))
+
+
+def get_map_view(data_dir, p1, p2):
+    map_file_path = os.path.join(data_dir, 'gExportsMap.png')
+    img_map = cv2.imread(map_file_path)
+
+    orth_data = OrthoData(data_dir)
+    map_p1 = orth_data.convert_world_point_to_map(p1, img_map.shape)
+    map_p2 = orth_data.convert_world_point_to_map(p2, img_map.shape)
+
+    # cv_azul_color = (255, 255, 0)
+    cv_green_color = (0, 255, 0)
+    cv_red_color = (0, 0, 255)
+    cv2.circle(img_map, center=map_p1, radius=8, color=cv_green_color, thickness=cv2.FILLED)
+    cv2.circle(img_map, center=map_p2, radius=8, color=cv_red_color, thickness=cv2.FILLED)
+
+    crop = True
+    if crop:
+        left = 4400
+        top = 5500
+        width = 800
+        height = 800
+        img_map = img_map[top:top + height, left:left + width]
+
+    return img_map
+
+
+# asc=np.argsort(xy_error_train)
+# dsc=np.argsort(xy_error_train)[::-1]
+# idx = 0
+# xy_error_train[asc][idx]
+# see_view(loader, loader.x_train[asc], loader.y_train[asc], idx)
+# see_view(loader, loader.x_train[asc], y_train_pred[asc], idx)
+def view_prediction(data_dir, loader, y_predict, xy_error_train, idx=0, figure_num=99, asc=True):
+    sort_idx = np.argsort(xy_error_train) if asc else np.argsort(xy_error_train)[::-1]
+
+    y_single_org = loader.y_inverse_transform(loader.y_train[sort_idx][idx])
+    y_single_predict = loader.y_inverse_transform(y_predict[sort_idx][idx])
+
+    img_org = render_view(y_single_org)
+    img_pred = render_view(y_single_predict)
+    img_map = get_map_view(data_dir, y_single_org[:2], y_single_predict[:2])
+
+    upper_part_height = int(0.33333 * img_org.shape[0])
+    cv_red_color = (0, 0, 255)
+    cv2.line(img_org, (0, upper_part_height), (img_org.shape[1], upper_part_height), cv_red_color, 3)
+    cv2.line(img_pred, (0, upper_part_height), (img_org.shape[1], upper_part_height), cv_red_color, 3)
+
+    img_org = cv2.cvtColor(img_org, cv2.COLOR_BGR2RGB)
+    img_pred = cv2.cvtColor(img_pred, cv2.COLOR_BGR2RGB)
+    img_train = cv2.cvtColor(loader.x_train[sort_idx][idx], cv2.COLOR_GRAY2RGB)
+    img_map = cv2.cvtColor(img_map, cv2.COLOR_BGR2RGB)
+
+    multiple_plots(figure_num, 2, 2, 1)
+    plt.imshow(img_org, interpolation='bilinear')
+    plt.title('Original' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single_org))
+
+    multiple_plots(figure_num, 2, 2, 2)
+    plt.imshow(img_pred, interpolation='bilinear')
+    plt.title('Estimation' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single_predict))
+
+    multiple_plots(figure_num, 2, 2, 3)
+    plt.imshow(img_train)
+    plt.title('NN Input')
+
+    multiple_plots(figure_num, 2, 2, 4)
+    plt.imshow(img_map)
+    plt.title('Map')
+
+    plt.suptitle("idx = %i/%i (%s), xy_error_train = %s" % (idx, len(xy_error_train) - 1, 'asc' if asc else 'desc',
+                                                            xy_error_train[sort_idx][idx]))
+    # , fontsize=16)
+
+    plt.show()
+
+
 def show_predictions(x, y, prediction, file_urls, scaler, encoder, resize_factor=4, title="show_image"):
     key = None
 
@@ -211,6 +323,8 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
 def visualize_history(history, sess_info, render_to_screen=True):
     try:
         print("History results-")
+        print(history.history)
+        print("")
         for d in history.history:
             print("%s = %s" % (d, history.history[d]))
 

@@ -7,7 +7,7 @@ from keras.layers import Conv2D, MaxPooling2D, AveragePooling2D, SeparableConv2D
 from keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, merge, Reshape, Permute, Layer
 from keras.layers.advanced_activations import PReLU
 from keras.models import Sequential, Model
-from keras.optimizers import SGD, adadelta, Adam, RMSprop
+from keras.optimizers import SGD, Adadelta, Adam, RMSprop
 from keras.regularizers import l2
 from keras.callbacks import Callback, ModelCheckpoint, TensorBoard
 
@@ -132,7 +132,7 @@ class myModelCheckpoint(Callback):
                             if self.best_filepath is not None:
                                 if self.verbose > 0:
                                     print("Removing ", self.best_filepath)
-                                os.unlink(self.best_filepath)
+                                utils.rm_file(self.best_filepath)
                             self.best_filepath = filepath
 
                         if self.save_weights_only:
@@ -152,35 +152,41 @@ class myModelCheckpoint(Callback):
                     self.model.save(filepath, overwrite=True)
 
 
-def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_board=False):
+def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_board=False, monitor_also_loss=True):
     hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
     utils.mkdirs(hdf5_dir)
 
     if K.backend() != 'tensorflow':
         tensor_board = False
 
+    res_cbs = []
+
     tensor_board_cp = None
     if tensor_board:
         tensor_board_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'tensor_board')
         utils.mkdirs(tensor_board_dir)
         tensor_board_cp = TensorBoard(log_dir=tensor_board_dir, histogram_freq=1, write_graph=True)
+        res_cbs.append(tensor_board_cp)
 
     if is_classification:
         monitor = "val_loss"
         extra_params = "_vacc{val_acc:.3f}"
     else:
         monitor = "val_loss"
-        # monitor = "loss"
         extra_params = ""
 
     hdf5_fname = sess_info.title + "_weights.e{epoch:03d}-loss{loss:.5f}-vloss{val_loss:.4f}" + extra_params + ".hdf5"
     hdf5_full_path = os.path.join(hdf5_dir, hdf5_fname)
 
     model_cp = myModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only, monitor=monitor)
-    if tensor_board:
-        return [model_cp, tensor_board_cp]
-    else:
-        return [model_cp]
+    res_cbs.append(model_cp)
+
+    if monitor_also_loss:
+        model_loss_cp = myModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only,
+                                          monitor="loss")
+        res_cbs.append(model_loss_cp)
+
+    return res_cbs
 
 
 def angle_difference(x, y):

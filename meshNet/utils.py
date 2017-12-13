@@ -34,10 +34,14 @@ def part_of(part, *arrays):
         raise Exception("Part argument cannot be <= 0")
 
     print("Handling part of data...")
-    if part <= 1.0:
-        part = int(len(arrays[0]) * part)
+    res_arrays = []
+    for array in arrays:
+        cur_part = part
+        if cur_part <= 1.0:
+            cur_part = int(len(array) * cur_part)
+        res_arrays.append(array[:cur_part])
 
-    return tuple([array[:part] for array in arrays])
+    return tuple(res_arrays) if len(arrays) > 1 else res_arrays[0]
 
 
 def mkdirs(full_path):
@@ -61,16 +65,21 @@ def cd(new_dir):
         os.chdir(prev_dir)
 
 
+def rm_file(file_path, skip_dirs=True):
+    try:
+        if os.path.isfile(file_path):
+            os.unlink(file_path)
+        elif not skip_dirs and os.path.isdir(file_path):
+            shutil.rmtree(file_path)
+    except Exception as e:
+        print(e)
+
+
 # import os, shutil
 def rm_files(base_dir):
     for cur_file in os.listdir(base_dir):
         file_path = os.path.join(base_dir, cur_file)
-        try:
-            if os.path.isfile(file_path):
-                os.unlink(file_path)
-            #elif os.path.isdir(file_path): shutil.rmtree(file_path)
-        except Exception as e:
-            print(e)
+        rm_file(file_path)
 
 
 def load_pickle(pickle_full_path):

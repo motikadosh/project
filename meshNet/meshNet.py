@@ -23,30 +23,34 @@ import consts
 # Not used in code, for easier interactive debugging
 # import matplotlib.pyplot as plt
 
-# from keras import backend as keras_backend
-# import tensorflow as tf
-
-# from models import CNN
-# from models.layers.spatial_transform import SpatialTransformFreezeController
-# from utilities import Logger, visualization, keras_utils, preprocessing, utils, pb_models_data, consts
-
 # Script config
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-data_dir = '/home/moti/cg/project/sessions_outputs/berlin_many_angels_few_xys/-1520.15_1422.77/'
+# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid200/'
+# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid400/'
+data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid800/'
+
+# data_dir = '/home/moti/cg/project/sessions_outputs/berlin_many_angels_few_xys/-1520.15_1422.77/'
 # data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
 # data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_grid50/'
 # data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
 # data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-21_41_07-grid_40/'
 train_dir = os.path.join(data_dir, 'train')
-test_dir = None
-# test_dir = os.path.join(data_dir, 'test')
+# test_dir = None
+test_dir = os.path.join(data_dir, 'test')
 
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
 # weights_filename = '/home/arik/Desktop/moti/project/meshNet/sessions_outputs/meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5'
-weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5'
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5'
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_28-13_53_12-100Epochs_Berlin_ROI_Grid200_NoAngles/hdf5/meshNet_weights.e093-loss0.07357-vloss0.5875.hdf5'
 
+# 200
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-12_40_01-100Epochs_Grid200_Batch4/hdf5/meshNet_weights.e098-loss0.07383-vloss0.4329.hdf5'
+
+# 400
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5'
+weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5'
 
 render_to_screen = False
 test_only = False
@@ -56,34 +60,22 @@ if test_only:
     load_weights = True
 
 # Training options
-batch_size = 64
+batch_size = 32
 save_best_only = True
 
 debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    nb_epoch = 60
+    epochs = 100
 elif debug_level == 1:  # Medium Debug
     part_of_data = 0.3
-    nb_epoch = 15
+    epochs = 15
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
-    nb_epoch = 3
+    epochs = 3
 else:
     raise Exception("Invalid debug level " + str(debug_level))
-
-single_spot = False
-if single_spot:
-    import warnings
-    warnings.warn('Running single spot')
-
-    train_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/train/-2.34907_7.04721'
-    test_dir = None
-    test_only = False
-    load_weights = False
-    part_of_data = 1.0
-    nb_epoch = 100
 
 
 def predict(model, x):
@@ -158,18 +150,8 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
     return xy_error, xy_error_mean, xy_error_std, angle_error, angle_error_mean, angle_error_std
 
 
-def see_view(loader, x, y, idx):
-    visualize.imshow("see_view", x[idx])
-
-    pose = loader.y_inverse_transform(y[idx])
-    view_str = "%f %f %f %f %f %f" % (pose[0], pose[1], 9999, pose[2], pose[3], 0)
-    print("Calling PROJECT with pose %s" % view_str)
-
-    from subprocess import call
-    call(['../project', '../../berlin/berlin.obj', '-pose=' + view_str])
-
-
-def detailed_evaluation(model, loader):
+# visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
+def detailed_evaluation(model, loader, posenet_output=3):
     print("detailed evaluation...")
 
     print("Predicting train set...")
@@ -184,8 +166,11 @@ def detailed_evaluation(model, loader):
     # print("Test l2 loss", l2_test_loss)
 
     # PoseNet Fix
-    y_train_pred = np.concatenate((y_train_pred[4], y_train_pred[5]), axis=-1)
-    y_test_pred = np.concatenate((y_test_pred[4], y_test_pred[5]), axis=-1)
+    print("Using PoseNet output [%d]" % posenet_output)
+    xyz_output = (posenet_output - 1) * 2
+    angle_output = xyz_output + 1
+    y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[angle_output]), axis=-1)
+    y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[angle_output]), axis=-1)
 
     xy_error_train, xy_error_mean_train, xy_error_std_train, \
         angle_error_train, angle_error_mean_train, angle_error_std_train = \
@@ -252,9 +237,7 @@ def main():
 
     print("Getting model...")
     image_shape = loader.x_train.shape[1:]
-    nb_outs = len(loader.y_train[0])
-    # print("image_shape: %d " % image_shape)
-    # print("nb_outs: %d " % nb_outs)
+    # nb_outs = len(loader.y_train[0])
 
     # Custom loss is mandatory to take 360 degrees into consideration
     # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
@@ -265,41 +248,50 @@ def main():
     params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'cyc_nb_outs': 2}
     model, model_name = posenet.posenet_train(**params)
 
-    print("Model name: %s " % model_name)
-    print("Model function input arguments:", params)
-    print("Batch size: %i" % batch_size)
-
     if load_weights:
         meshNet_model.load_model_weights(model, weights_filename)
 
-    print("Model params number: %d " % model.count_params())
-    print("Model loss type: %s " % model.loss)
+    print("image_shape: ", image_shape)
+    # print("nb_outs: %d " % nb_outs)
+    print("Model name: ", model_name)
+    print("Model function input arguments: ", params)
+    print("Batch size: ", batch_size)
+    print("")
+
+    print("Model params number: ", model.count_params())
+    print("Model loss type: %s" % model.loss)
+    print("Model optimizer: ", model.optimizer)
+    print("")
+
+    print("y_min_max: ", loader.y_min_max)
+    print("y range: ", loader.y_min_max[1] - loader.y_min_max[0])
+    print("")
+
     model.summary()
     print("")
 
     if not test_only:
         print("Training model...")
-        # Saves the model weights after each epoch if the validation loss decreased
+        # TODO: Consider adding custom callback to monitor each loss separately and save best epochs accordingly
         callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
                                                  tensor_board=False)
 
         history = model.fit(loader.x_train, [loader.y_train[:, 0:2], loader.y_train[:, 2:4],
                                              loader.y_train[:, 0:2], loader.y_train[:, 2:4],
                                              loader.y_train[:, 0:2], loader.y_train[:, 2:4]],
-                            batch_size=batch_size, epochs=nb_epoch, callbacks=callbacks,
+                            batch_size=batch_size, epochs=epochs, callbacks=callbacks,
                             validation_data=(loader.x_test,
                                              [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                               loader.y_test[:, 0:2], loader.y_test[:, 2:4]]),
                             shuffle=True, initial_epoch=initial_epoch)
-        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=nb_epoch,
+        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
         # callbacks=callbacks, validation_data = (loader.x_test, loader.y_test), shuffle = True)
 
         meshNet_model.load_best_weights(model, sess_info)
     else:
         history = None
 
-    # TODO: Run test and detailed EVAL on best EPOCH - Minimum val loss
     test_score = model.evaluate(loader.x_test, [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                 loader.y_test[:, 0:2], loader.y_test[:, 2:4],
                                 loader.y_test[:, 0:2], loader.y_test[:, 2:4]], batch_size=1, verbose=0)
@@ -309,10 +301,13 @@ def main():
     if not test_only:
         loader.save_pickle(sess_info)
 
-    detailed_evaluation(model, loader)
-
     if history:
         visualize.visualize_history(history, sess_info, render_to_screen)
+
+    # TODO: Choose best output according to test_score
+    detailed_evaluation(model, loader, 1)
+    detailed_evaluation(model, loader, 2)
+    detailed_evaluation(model, loader, 3)
 
 
 if __name__ == '__main__':

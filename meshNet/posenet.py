@@ -10,7 +10,7 @@ from keras.layers import merge, Reshape, Activation, BatchNormalization
 # from keras.utils.np_utils import convert_kernel
 from keras import backend as K
 from keras.models import Model
-from keras.optimizers import Adam
+from keras.optimizers import Adam, Adadelta
 import tensorflow as tf
 import numpy as np
 
@@ -416,7 +416,8 @@ def posenet_train(image_shape, xy_nb_outs, cyc_nb_outs, optimizer=None, loss=Non
     model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, cyc_nb_outs=cyc_nb_outs)
 
     if optimizer is None:
-        optimizer = Adam(lr=0.001, clipvalue=1.5)
+        optimizer = Adam(lr=0.001, clipvalue=1.5)  # Original
+        # optimizer = Adadelta()
     if loss is None:
         loss = {'cls1_fc_pose_xyz': euc_loss1x, 'cls1_fc_pose_wpqr': cyclic_loss_1,
                 'cls2_fc_pose_xyz': euc_loss2x, 'cls2_fc_pose_wpqr': cyclic_loss_2,
