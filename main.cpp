@@ -61,6 +61,7 @@
 //
 DEFINE_string(model, "../berlin/berlin.obj", "Path to model file");
 DEFINE_string(pose, "", "Pose string to use as start-up. Format: \"x y z yaw pitch roll\"");
+DEFINE_string(single, "", "Show single image and exit. Used when program is called from Python with some pose");
 //DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
 DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
 DEFINE_bool(resume_export, false, "Use check_point.txt to resume samples export");
@@ -78,6 +79,7 @@ DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- igno
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
 DEFINE_int32(min_edges_threshold, 4, "Minimum number of edges for sample exporting");
 DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage for sample exporting");
+DEFINE_double(min_sky_precent, 0.5, "Minimum of most upper line to be BG - I.e. Sky");
 //DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
 
 DEFINE_int32(win_width, 800, "Width of the main window");
@@ -98,6 +100,7 @@ const float PI = 3.14159265358979323846264f;
 #define FACES_WINDOW_NAME "faces_win"
 #define CV_WINDOW_NAME "cv_win"
 #define UPPER_MAP_WINDOW_NAME "upper_map"
+#define EXPORT_MAP_WINDOW_NAME "exports_map"
 
 #define DBG(params) \
     do { \
@@ -425,6 +428,15 @@ struct OrthoProjection {
         return cv::Point(mapX, mapY);
     }
 
+    cv::Point3f convertMapPointToWorld(const cv::Point &p, const cv::Size &mapSize)
+    {
+        float worldX = (right - left) * p.x / float(mapSize.width) + left;
+        float worldY = (top - bottom) * p.y / float(mapSize.height) + bottom;
+
+        return cv::Point3f(worldX, worldY, 0);
+    }
+
+
 private:
     const std::string SEP = "=";
 };
@@ -432,9 +444,10 @@ OrthoProjection gOrthoProjData(0, 0, 0, 0, 0, 0);
 
 cv::Mat gModelMap;
 cv::Mat gGroundLevelMap;
+cv::Rect gSamplesROI;
 
 cv::Mat gSamplesMap;
-cv::Mat gUpperMapShow;
+cv::Mat gExportsMap;
 
 //
 // Pre-declarations
@@ -633,7 +646,7 @@ void myPutText(cv::Mat &img, std::stringstream &ss, cv::Point org, bool lineWrap
     } while (!ss.eof());
 }
 
-void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp")
+void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string &winName = "temp", bool destroy = true)
 {
     if (img.empty())
         return;
@@ -642,7 +655,8 @@ void imshowAndWait(const cv::Mat &img, unsigned waitTime = 0, const std::string 
     cv::imshow(winName, img);
     cv::waitKey(waitTime);
 
-    cv::destroyWindow(winName);
+    if (destroy)
+        cv::destroyWindow(winName);
 }
 
 void printViewPort()
@@ -2057,6 +2071,10 @@ void loadModelMap(const std::string &modelFile)
     DBG("Model map loaded. size " << gModelMap.size() << ", channels [" << gModelMap.channels() << "]");
     //imshowAndWait(gModelMap, 0);
 
+    gSamplesROI = cv::Rect(cv::Point(), gModelMap.size()); // Entire map
+    if (!FLAGS_sample_rect.empty())
+        gSamplesROI = parseRectStr(FLAGS_sample_rect); // User ROI
+
     std::string groundLevelFileName = prefix + "_ground_level_map.png";
     gGroundLevelMap = cv::imread(groundLevelFileName);
     if (gGroundLevelMap.empty())
@@ -2166,12 +2184,16 @@ void handleNavKeyboard(int key)
         setAutoNavState(!gAutoNavigation);
         break;
 
-    case 'i':
+    case 'k':
         gAutoNavigationIdx++;
+        if (gAutoNavigationIdx == gDataSet["train"].xfSamples.size())
+            gAutoNavigationIdx = 0;
         DBG("Up gAutoNavigationIdx [" << gAutoNavigationIdx << "]");
         break;
-    case 'I':
+    case 'j':
         gAutoNavigationIdx--;
+        if (gAutoNavigationIdx == -1)
+            gAutoNavigationIdx = gDataSet["train"].xfSamples.size() - 1;
         DBG("Down gAutoNavigationIdx [" << gAutoNavigationIdx << "]");
         break;
     case 'o':
@@ -2440,19 +2462,17 @@ bool getPointZ(const cv::Point3f &p, cv::Point3f &pWithZ)
 }
 
 void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoints, cv::Mat &colorMap,
-    const cv::Scalar &goodColor)
+    const cv::Scalar &goodColor, const cv::Scalar &badColor)
 {
     cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
 
-    cv::Rect sampleROI = cv::Rect(cv::Point(), gModelMap.size()); // Entire map
     if (!FLAGS_sample_rect.empty())
     {
-        sampleROI = parseRectStr(FLAGS_sample_rect); // User ROI
-        float thicknessFactor = gModelMap.cols / 800;
-        cv::rectangle(colorMap, sampleROI, green, 1 * thicknessFactor);
+        float thicknessFactor = gModelMap.cols / FLAGS_win_width;
+        cv::rectangle(colorMap, gSamplesROI, green, 1 * thicknessFactor);
     }
 
-    if (!sampleROI.contains(mapPoint))
+    if (!gSamplesROI.contains(mapPoint))
     {
         DBG_T("P is out of map ROI. Skipping");
         return;
@@ -2462,12 +2482,12 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
     if (gModelMap.at<char>(mapPoint.y, mapPoint.x))
     {
         DBG_T("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " is not free");
-        color = red;
+        color = badColor;
     }
     else if (gGroundLevelMap.at<char>(mapPoint.y, mapPoint.x) == 255)
     {
         DBG_T("Position- model(x,y), image(x,y): " << p << ", " << mapPoint << " unknown ground level");
-        color = orange;
+        color = magenta;
     }
     else
     {
@@ -2560,6 +2580,17 @@ void populateXfVector()
         xMax += height / 20;
     }
 
+    if (!FLAGS_sample_rect.empty())
+    {
+        cv::Point3f worldTL = gOrthoProjData.convertMapPointToWorld(gSamplesROI.tl(), gModelMap.size());
+        cv::Point3f worldBR = gOrthoProjData.convertMapPointToWorld(gSamplesROI.br(), gModelMap.size());
+
+        xMin = worldTL.x;
+        xMax = worldBR.x;
+        yMin = worldTL.y;
+        yMax = worldBR.y;
+    }
+
 #endif
     DBG("xMin [" << xMin << "], xMax [" << xMax << "], yMin [" << yMin << "], yMax [" << yMax << "]");
 
@@ -2579,19 +2610,18 @@ void populateXfVector()
         while (gDataSet["test"].samplePoints.size() < FLAGS_samples_num * FLAGS_test_percent)
         {
             cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
-            checkPointAndSetZ(newPoint, gDataSet["test"].samplePoints, gSamplesMap, blue);
+            checkPointAndSetZ(newPoint, gDataSet["test"].samplePoints, gSamplesMap, blue, orange);
         }
 
         // Generate train random points
         while (gDataSet["train"].samplePoints.size() < FLAGS_samples_num * (1 - FLAGS_test_percent))
         {
             cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
-            checkPointAndSetZ(newPoint, gDataSet["train"].samplePoints, gSamplesMap, green);
+            checkPointAndSetZ(newPoint, gDataSet["train"].samplePoints, gSamplesMap, green, red);
         }
     }
     else
     {
-
 #ifdef ROUND_SAMPLING
         float stepX = rad * 2 / FLAGS_grid;
         float stepY = rad * 2 / FLAGS_grid;
@@ -2603,13 +2633,13 @@ void populateXfVector()
 
         for (float x = xMin; x < xMax; x += stepX)
             for (float y = yMin; y < yMax; y += stepY)
-                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, gSamplesMap, green);
+                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, gSamplesMap, green, red);
 
         float offsetX = stepX * FLAGS_grid_test_offset;
         float offsetY = stepY * FLAGS_grid_test_offset;
         for (float x = xMin + offsetX; x < xMax - offsetX; x += stepX)
             for (float y = yMin + offsetY; y < yMax - offsetY; y += stepY)
-                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, gSamplesMap, blue);
+                checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["test"].samplePoints, gSamplesMap, blue, orange);
     }
 
     std::string samplesPositionsMapFilePath = FLAGS_output_dir + "gSamplesMap.png";
@@ -2677,7 +2707,8 @@ cv::Mat convertImgToBinary(const cv::Mat &img)
 }
 
 // Returns false if image does not have enough data/edges or imwrite fails
-bool checkAndSaveCurrentSceen(const std::string &filePath)
+bool checkAndSaveCurrentSceen(const std::string &filePath,
+    cv::Mat *edges = NULL, cv::Mat *faces = NULL, bool dbg = false)
 {
     DBG_T("Entered");
 
@@ -2706,12 +2737,25 @@ bool checkAndSaveCurrentSceen(const std::string &filePath)
         facesImg = facesImg(upperPart);
     }
 
+    if (edges)
+        *edges = img;
+    if (faces)
+        *faces = facesImg;
+
     std::vector<int> edgesInView = findEdgesInView(img, FLAGS_min_edge_pixels);
     if ((int)edgesInView.size() < FLAGS_min_edges_threshold)
     {
-        DBG_T("Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]");
-
-        //imshowAndWait(img);
+        std::stringstream ss;
+        ss << "Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]";
+        if (dbg)
+        {
+            DBG(ss.str());
+            imshowAndWait(img, 0, "skip-min_edges_threshold");
+        }
+        else
+        {
+            DBG_T(ss.str());
+        }
         return false;
     }
 
@@ -2729,6 +2773,39 @@ bool checkAndSaveCurrentSceen(const std::string &filePath)
                 imageContentPrecentage << "/" << FLAGS_min_data_threshold  << "]");
             return false;
         }
+    }
+
+    if (FLAGS_min_sky_precent)
+    {
+        unsigned countWhite = 0;
+        for (int x = 0; x < facesImg.cols; x++)
+        {
+            if (facesImg.at<cv::Vec3b>(0, x) == cv::Vec3b(255, 255, 255))
+                countWhite++;
+        }
+
+        double skyPrecent = countWhite / double(facesImg.cols);
+        if (skyPrecent < FLAGS_min_sky_precent)
+        {
+            std::stringstream ss;
+            ss << "Skipping [" << filePath << "]. Sky precent [" << skyPrecent<< "<" << FLAGS_min_sky_precent << "]";
+            if (dbg)
+            {
+                DBG(ss.str());
+                imshowAndWait(facesImg, 0, "skip-min_sky_precent");
+            }
+            else
+            {
+                DBG_T(ss.str());
+            }
+            return false;
+        }
+    }
+
+    if (filePath.empty())
+    {
+        DBG("Empty filePath. Skipping save...");
+        return true;
     }
 
     if (!cv::imwrite(filePath + "_edges.png", img))
@@ -2833,6 +2910,9 @@ void autoNavigate()
     static int sExportsNum = 0;
     static int sSkipsNum = 0;
 
+    if (gExportsMap.empty())
+        gExportsMap = gSamplesMap.clone();
+
     if (FLAGS_resume_export)
     {
         std::string dummy;
@@ -2850,6 +2930,7 @@ void autoNavigate()
     std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
     std::vector<SamplePose> &samplesData = sIsTrain ? gDataSet["train"].samplesData : gDataSet["test"].samplesData;
 
+    cv::Mat exportsMap4Show;
     if (!gAutoNavigationIdx)
     {
         makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
@@ -2880,8 +2961,18 @@ void autoNavigate()
         }
         else
         {
+            if (FLAGS_sample_pos_only)
+            {
+                cv::circle(gExportsMap,
+                    gOrthoProjData.convertWorldPointToMap(cv::Point3f(samplesData[gAutoNavigationIdx - 1].x,
+                    samplesData[gAutoNavigationIdx - 1].y, samplesData[gAutoNavigationIdx - 1].z), gModelMap.size()),
+                    3, sIsTrain ? red : orange, CV_FILLED);
+            }
             sSkipsNum++;
         }
+        cv::resize(gExportsMap(gSamplesROI), exportsMap4Show,
+            cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
+        cv::imshow(EXPORT_MAP_WINDOW_NAME, exportsMap4Show);
 
         // Sanity
         if (xf != xfSamples[gAutoNavigationIdx - 1])
@@ -2922,6 +3013,18 @@ void autoNavigate()
         gAutoNavigationIdx = 0;
         sExportsNum = 0;
         sSkipsNum = 0;
+
+        // Save exports maps to disk
+        std::string exportsMap4showFilePath = FLAGS_output_dir + "exportsMap4Show.png";
+        if (!cv::imwrite(exportsMap4showFilePath, exportsMap4Show))
+            std::cout << "Failed saving exportsMap4Show to [" << exportsMap4showFilePath << "]" << std::endl;
+        std::string exportsMapFilePath = FLAGS_output_dir + "gExportsMap.png";
+        if (!cv::imwrite(exportsMapFilePath, gExportsMap))
+            std::cout << "Failed saving exportsMap4Show to [" << exportsMapFilePath << "]" << std::endl;
+
+        // Export gOrthoProjData
+        std::string orthoDataOutFilePath = FLAGS_output_dir + "map_ortho_data.txt";
+        gOrthoProjData.write(orthoDataOutFilePath);
     }
 
     DBG_T("Done");
@@ -2960,7 +3063,7 @@ void initGoogleLogs(const std::string &appName)
 
 void updateUpperMapShow()
 {
-    gUpperMapShow = gSamplesMap.clone();
+    cv::Mat upperMapShow = gSamplesMap.clone();
 
     // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
     trimesh::xform xfInv = inv(xf);
@@ -2968,17 +3071,62 @@ void updateUpperMapShow()
     //DBG("xf\n" << xf);
     //DBG("xfInv\n" << xfInv);
 
-    cv::circle(gUpperMapShow,
+    cv::circle(upperMapShow,
         gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size()),
-        (gModelMap.cols/ FLAGS_win_width) * 8, azul, CV_FILLED);
+        (gSamplesROI.width / FLAGS_win_width) * 8, azul, CV_FILLED);
 
-    cv::resize(gUpperMapShow, gUpperMapShow, cv::Size(FLAGS_win_width, FLAGS_win_height));
+    cv::resize(upperMapShow(gSamplesROI), upperMapShow,
+        cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
 
-    std::stringstream ss;
-    ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
-    myPutText(gUpperMapShow, ss, cv::Point(5, 10));
+    //std::stringstream ss;
+    //ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
+    //myPutText(upperMapShow, ss, cv::Point(5, 10));
 
-    cv::imshow(UPPER_MAP_WINDOW_NAME, gUpperMapShow);
+    cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
+}
+
+void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdata)
+{
+    if (event == cv::EVENT_LBUTTONDOWN)
+    {
+        // Changing view to closest sample to mouse press
+        cv::Point userMapP = cv::Point(x, y) + gSamplesROI.tl();
+        DBG("userMapP: " << userMapP << ", x,y: " << cv::Point(x, y) << "gSamplesROI tl: " << gSamplesROI.tl());
+
+        unsigned minDistIdx;
+        double minDist = std::numeric_limits<double>::max();
+        for (unsigned i = 0; i < gDataSet["train"].samplesData.size(); i++)
+        {
+            SamplePose &pose = gDataSet["train"].samplesData[i];
+            cv::Point3f sampleP(pose.x, pose.y, pose.z);
+
+            cv::Point sampleMapPoint = gOrthoProjData.convertWorldPointToMap(sampleP, gModelMap.size());
+
+            double dist = cv::norm(userMapP - sampleMapPoint);
+            if (dist < minDist)
+            {
+                minDistIdx = i;
+                minDist = dist;
+            }
+        }
+
+        gAutoNavigationIdx = minDistIdx;
+
+        xf = gDataSet["train"].xfSamples[gAutoNavigationIdx];
+
+        DBG("Jumping to train sample [#" << gAutoNavigationIdx << "], pose [" <<
+            gDataSet["train"].samplesData[gAutoNavigationIdx] << "], xf\n" << xf);
+    }
+    else if (event == cv::EVENT_RBUTTONDOWN)
+    {
+        // Viewing current view edges & faces as will be exported
+        cv::Mat edges, faces;
+        if (checkAndSaveCurrentSceen("", &edges, &faces, true))
+        {
+            imshowAndWait(edges, 33, "edges", false);
+            imshowAndWait(faces, 33, "faces", false);
+        }
+    }
 }
 
 int main(int argc, char* argv[])
@@ -3022,6 +3170,9 @@ int main(int argc, char* argv[])
     //initWindow(VERTEX_WINDOW_NAME, FLAGS_win_width, FLAGS_win_height, redrawVertex);
     //cv::setMouseCallback(VERTEX_WINDOW_NAME, mouseNavCallbackFunc, NULL);
 
+    cv::namedWindow(UPPER_MAP_WINDOW_NAME, cv::WINDOW_NORMAL);
+    cv::setMouseCallback(UPPER_MAP_WINDOW_NAME, mouseUpperMapCallbackFunc, NULL);
+
     // Init cvPhoto window
     //cvPhoto = cv::imread(imageFile);
     //cvMap = cv::imread(mapFile);
@@ -3038,19 +3189,34 @@ int main(int argc, char* argv[])
     verifySize(FACES_WINDOW_NAME);
     //verifySize(VERTEX_WINDOW_NAME);
 
-    for (;;)
+    if (!FLAGS_single.empty())
     {
-        updateUpperMapShow();
         updateWindows();
+        cv::waitKey(33);
 
-        int key = cv::waitKey(gAutoNavigation ? 5 : 0); //33);
-        if (key == 27) // ESC key
-            break;
+        cv::Mat curEdgeView = getCvMatFromScreen(MAIN_WINDOW_NAME);
+        std::string filePath = FLAGS_single;
+        if (cv::imwrite(filePath, curEdgeView))
+            DBG("Saved [" << filePath << "]");
+        else
+            DBG("Failed saving [" << filePath << "]");
+    }
+    else
+    {
+        for (;;)
+        {
+            updateUpperMapShow();
+            updateWindows();
 
-        handleKeyboard(key);
+            int key = cv::waitKey(gAutoNavigation ? 5 : 33); //33);
+            if (key == 27) // ESC key
+                break;
 
-        if (gAutoNavigation)
-            autoNavigate();
+            handleKeyboard(key);
+
+            if (gAutoNavigation)
+                autoNavigate();
+        }
     }
 
     cv::setOpenGlDrawCallback(MAIN_WINDOW_NAME, 0, 0);
