@@ -135,29 +135,21 @@ def count_files_in_folder(path, extentions):
     return count
 
 
-def parse_shape(shape):
-    from keras import backend as keras_backend
+def xy_dist(y, y_pred):
+    if y.shape[1] != 2:
+        raise Exception("Unexpected dim - should be points array")
 
-    dim_order = keras_backend.image_dim_ordering()
-    if dim_order == 'th':
-        channels, rows, cols = shape
-    elif dim_order == 'tf':
-        rows, cols, channels = shape
-    else:
-        raise Exception("Unexpected dim order")
-
-    return rows, cols, channels
+    dist = np.linalg.norm(y - y_pred, axis=-1)
+    return dist
 
 
-def get_image_from_batch(x, n):
-    from keras import backend as keras_backend
+def angle_diff(a, b):
+    # Return a signed difference between two angles
+    # I.e. the minimum distance from src(a) to dst(b) - consider counter-clockwise as positive
+    return (a - b + 180) % 360 - 180
 
-    image = x[n]
 
-    dim_order = keras_backend.image_dim_ordering()
-    if dim_order == 'th':
-        return np.transpose(image, (1, 2, 0))
-    elif dim_order == 'tf':
-        return image
-    else:
-        raise Exception("Unexpected dim order")
+def angle_l2_err(y, y_pred, normalized=False):
+    f = 360.0 if normalized else 1.0
+    return np.linalg.norm(angle_diff(y * f, y_pred * f) / f, axis=-1)
+

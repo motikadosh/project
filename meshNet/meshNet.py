@@ -29,7 +29,9 @@ sess_info = utils.SessionInfo(title)
 
 # data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid200/'
 # data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid400/'
-data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid800/'
+# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid800/'
+# data_dir = '/home/moti/cg/project/sessions_outputs/berlin_angleOnly_4950_5850/'
+data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid200_Full/'
 
 # data_dir = '/home/moti/cg/project/sessions_outputs/berlin_many_angels_few_xys/-1520.15_1422.77/'
 # data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
@@ -50,8 +52,15 @@ test_dir = os.path.join(data_dir, 'test')
 
 # 400
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5'
-weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5'
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5'
 
+# angle only
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_13-12_40_52-100Epochs_anglesOnly_Batch8/hdf5/meshNet_weights.e090-loss0.00323-vloss0.0023.hdf5'
+
+# 200 - FULL
+weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5'
+
+use_pickle = False
 render_to_screen = False
 test_only = False
 load_weights = False
@@ -95,36 +104,6 @@ def predict(model, x):
 #     return l2_loss
 
 
-def calc_angle_diff(a, b):
-    # Return a signed difference between two angles
-    # I.e. the minimum distance from src(a) to dst(b) - consider counter-clockwise as positive
-    return (a - b + 180) % 360 - 180
-
-
-def calc_angle_stats(y, y_pred):
-    err = np.linalg.norm(calc_angle_diff(y, y_pred), axis=-1)
-    err_mean = np.mean(err)
-    err_std = np.std(err)
-
-    return err, err_mean, err_std
-
-
-def calc_angle_stats_unnormalized(y, y_pred):
-    err = np.linalg.norm(calc_angle_diff(y*360.0, y_pred*360.0)/360.0, axis=-1)
-    err_mean = np.mean(err)
-    err_std = np.std(err)
-
-    return err, err_mean, err_std
-
-
-def calc_xy_stats(y, y_pred):
-    err = np.linalg.norm(y - y_pred, axis=-1)
-    err_mean = np.mean(err)
-    err_std = np.std(err)
-
-    return err, err_mean, err_std
-
-
 def print_results(y, y_pred, file_urls, xy_error):
     for i in xrange(y_pred.shape[0]):
         print("Sample #%s. File: %s" % (i, file_urls[i]))
@@ -133,21 +112,17 @@ def print_results(y, y_pred, file_urls, xy_error):
 
 
 def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
-    angle_stats_fn = calc_angle_stats_unnormalized
-
     if not normalized:
         y = loader.y_inverse_transform(y)
         y_pred = loader.y_inverse_transform(y_pred)
-        angle_stats_fn = calc_angle_stats
 
     print("%s errors..." % dataset_name)
-    xy_error, xy_error_mean, xy_error_std = calc_xy_stats(y[:, 0:2], y_pred[:, 0:2])
-    # print_results(y, y_pred, file_urls, xy_error)
-    print("%s xy error. Mean %s, std %s" % (dataset_name, xy_error_mean, xy_error_std))
-    angle_error, angle_error_mean, angle_error_std = angle_stats_fn(y[:, 2:4], y_pred[:, 2:4])
-    print("%s angle error. Mean %s, std %s" % (dataset_name, angle_error_mean, angle_error_std))
+    xy_error = utils.xy_dist(y[:, 0:2], y_pred[:, 0:2])
+    print("%s xy error. Mean %s, std %s" % (dataset_name, np.mean(xy_error), np.std(xy_error)))
+    angle_error = utils.angle_l2_err(y[:, 2:4], y_pred[:, 2:4], normalized=normalized)
+    print("%s angle error. Mean %s, std %s" % (dataset_name, np.mean(angle_error), np.std(angle_error)))
 
-    return xy_error, xy_error_mean, xy_error_std, angle_error, angle_error_mean, angle_error_std
+    return xy_error, angle_error
 
 
 # visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
@@ -172,13 +147,14 @@ def detailed_evaluation(model, loader, posenet_output=3):
     y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[angle_output]), axis=-1)
     y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[angle_output]), axis=-1)
 
-    xy_error_train, xy_error_mean_train, xy_error_std_train, \
-        angle_error_train, angle_error_mean_train, angle_error_std_train = \
-        calc_stats(loader, loader.y_train, y_train_pred, normalized=False, dataset_name='Train')
+    xy_error_train, angle_error_train = calc_stats(loader, loader.y_train, y_train_pred, normalized=False,
+                                                   dataset_name='Train')
+    xy_error_test, angle_error_test = calc_stats(loader, loader.y_test, y_test_pred, normalized=False,
+                                                 dataset_name='Test')
 
-    xy_error_test, xy_error_mean_test, xy_error_std_test, \
-        angle_error_test, angle_error_mean_test, angle_error_std_test = \
-        calc_stats(loader, loader.y_test, y_test_pred, normalized=False, dataset_name='Test')
+    # for i in xrange(5):
+    #    visualize.view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx=i, is_train=True, by_xy=True,
+    #                              normalized=False, asc=False, figure_num=i)
 
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
     hist_fname = sess_info.title + '_predictions_err_hist.png'
@@ -219,7 +195,7 @@ def main():
     logger.Logger(sess_info)
     print("Entered %s" % title)
 
-    if load_weights:
+    if load_weights and use_pickle:
         pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
                                         sess_info.title + '.pkl')
         loader = meshNet_loader.DataLoader()
@@ -305,8 +281,8 @@ def main():
         visualize.visualize_history(history, sess_info, render_to_screen)
 
     # TODO: Choose best output according to test_score
-    detailed_evaluation(model, loader, 1)
-    detailed_evaluation(model, loader, 2)
+    # detailed_evaluation(model, loader, 1)
+    # detailed_evaluation(model, loader, 2)
     detailed_evaluation(model, loader, 3)
 
 

@@ -172,15 +172,37 @@ def get_map_view(data_dir, p1, p2):
 # xy_error_train[asc][idx]
 # see_view(loader, loader.x_train[asc], loader.y_train[asc], idx)
 # see_view(loader, loader.x_train[asc], y_train_pred[asc], idx)
-def view_prediction(data_dir, loader, y_predict, xy_error_train, idx=0, figure_num=99, asc=True):
-    sort_idx = np.argsort(xy_error_train) if asc else np.argsort(xy_error_train)[::-1]
+def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=True, by_xy=True, normalized=False,
+                    asc=True, figure_num=99):
+    if is_train:
+        y = loader.y_train
+        y_pred = y_train_pred
+    else:
+        y = loader.y_test
+        y_pred = y_test_pred
 
-    y_single_org = loader.y_inverse_transform(loader.y_train[sort_idx][idx])
-    y_single_predict = loader.y_inverse_transform(y_predict[sort_idx][idx])
+    # FIXME: Add arg for combined error
+    # errors = np.linalg.norm(y - y_pred, axis=-1)
 
-    img_org = render_view(y_single_org)
-    img_pred = render_view(y_single_predict)
-    img_map = get_map_view(data_dir, y_single_org[:2], y_single_predict[:2])
+    if not normalized:
+        y = loader.y_inverse_transform(y)
+        y_pred = loader.y_inverse_transform(y_pred)
+
+    xy_errors = utils.xy_dist(y[:, :2], y_pred[:, :2])
+    angle_errors = utils.angle_l2_err(y[:, 2:], y_pred[:, 2:], normalized)
+
+    errors = xy_errors if by_xy else angle_errors
+    sort_idx = np.argsort(errors) if asc else np.argsort(errors)[::-1]
+
+    y_single = y[sort_idx][idx]
+    y_pred_single = y_pred[sort_idx][idx]
+
+    if normalized:
+        raise Exception("Normalized is currently not supported")
+
+    img_org = render_view(y_single)
+    img_pred = render_view(y_pred_single)
+    img_map = get_map_view(data_dir, y_single[:2], y_pred_single[:2])
 
     upper_part_height = int(0.33333 * img_org.shape[0])
     cv_red_color = (0, 0, 255)
@@ -194,11 +216,11 @@ def view_prediction(data_dir, loader, y_predict, xy_error_train, idx=0, figure_n
 
     multiple_plots(figure_num, 2, 2, 1)
     plt.imshow(img_org, interpolation='bilinear')
-    plt.title('Original' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single_org))
+    plt.title('Original' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single))
 
     multiple_plots(figure_num, 2, 2, 2)
     plt.imshow(img_pred, interpolation='bilinear')
-    plt.title('Estimation' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single_predict))
+    plt.title('Estimation' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_pred_single))
 
     multiple_plots(figure_num, 2, 2, 3)
     plt.imshow(img_train)
@@ -208,9 +230,11 @@ def view_prediction(data_dir, loader, y_predict, xy_error_train, idx=0, figure_n
     plt.imshow(img_map)
     plt.title('Map')
 
-    plt.suptitle("idx = %i/%i (%s), xy_error_train = %s" % (idx, len(xy_error_train) - 1, 'asc' if asc else 'desc',
-                                                            xy_error_train[sort_idx][idx]))
-    # , fontsize=16)
+    angle_diff = utils.angle_diff(y_single[2:], y_pred_single[2:])
+    plt.suptitle("idx = %i/%i (%s), xy_err=%s, yaw_err=%s, pitch_err=%s, angle_l2=%s" %
+                 (idx if asc else len(errors) - 1 - idx, len(errors) - 1, 'asc' if asc else 'desc',
+                  xy_errors[sort_idx][idx],
+                  angle_diff[0], angle_diff[1], angle_errors[sort_idx][idx]))  # , fontsize=16)
 
     plt.show()
 
@@ -300,7 +324,8 @@ def show_data(x, offset=0, h_axis_num=None, v_axis_num=None, border_size=1, bg_c
                 cur_img = ((x[cur_idx, ...] + mean_img) * scale_img).astype('uint8')
                 if img_channels == 1:
                     cur_img = cv2.cvtColor(cur_img, cv2.COLOR_GRAY2RGB)
-                images[row * img_rows + row*border_size:row * img_rows + img_rows + row*border_size, col * img_cols + col*border_size:col * img_cols + img_cols + col*border_size, :] = cur_img
+                images[row * img_rows + row * border_size:row * img_rows + img_rows + row * border_size,
+                       col * img_cols + col * border_size:col * img_cols + img_cols + col * border_size, :] = cur_img
 
         current_images = str(offset) + "-" + str(offset + v_axis_num * h_axis_num - 1) + "_of_" + str(x.shape[0])
         title = "show_data_" + current_images
@@ -340,7 +365,8 @@ def visualize_history(history, sess_info, render_to_screen=True):
         ax.plot(history.epoch, history.history['loss'], 'r', label=target_names[0])
         ax.plot(history.epoch, history.history['val_loss'], 'g', label=target_names[1])
         ax.legend()
-        ax.set_ylim(ymin=0, ymax=3*max(history.history['val_loss']))  # Avoid very high values 'loss' might starts with
+        ax.set_ylim(ymin=0,
+                    ymax=3 * max(history.history['val_loss']))  # Avoid very high values 'loss' might starts with
         ax.set_title('Loss (train [%.2f, %.2f], val [%.2f, %.2f])' %
                      (min(history.history['loss']), max(history.history['loss']),
                       min(history.history['val_loss']), max(history.history['val_loss'])))
