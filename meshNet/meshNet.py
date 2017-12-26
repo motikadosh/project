@@ -27,17 +27,21 @@ import consts
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid200/'
-# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid400/'
-# data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid800/'
-# data_dir = '/home/moti/cg/project/sessions_outputs/berlin_angleOnly_4950_5850/'
-data_dir = '/home/moti/cg/project/sessions_outputs/berlinRoi_4400_5500_800_800Grid200_Full/'
+sessions_outputs = '/home/moti/cg/project/sessions_outputs'
+# sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
 
-# data_dir = '/home/moti/cg/project/sessions_outputs/berlin_many_angels_few_xys/-1520.15_1422.77/'
-# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_onlyPos_grid50/'
-# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/berlin_grid50/'
-# data_dir = '/home/arik/Desktop/moti/project/sessions_outputs/project_2017_09_06-12_40_19-grid_20/'
-# data_dir = '/home/moti/cg/project/sessions_outputs/project_2017_09_06-21_41_07-grid_40/'
+# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
+# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
+# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid800/')
+# data_dir = os.path.join(sessions_outputs, 'berlin_angleOnly_4950_5850/')
+# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_Full/')
+data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
+
+# data_dir = os.path.join(sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
+# data_dir = os.path.join(sessions_outputs, 'berlin_onlyPos_grid50/')
+# data_dir = os.path.join(sessions_outputs, 'berlin_grid50/')
+# data_dir = os.path.join(sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
+# data_dir = os.path.join(sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
 train_dir = os.path.join(data_dir, 'train')
 # test_dir = None
 test_dir = os.path.join(data_dir, 'test')
@@ -72,6 +76,9 @@ if test_only:
 batch_size = 32
 save_best_only = True
 
+x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
+y_type = 'angle'  # 'angle', 'quaternion', 'matrix'
+
 debug_level = 0
 
 if debug_level == 0:    # No Debug
@@ -82,7 +89,7 @@ elif debug_level == 1:  # Medium Debug
     epochs = 15
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
-    epochs = 3
+    epochs = 2
 else:
     raise Exception("Invalid debug level " + str(debug_level))
 
@@ -196,24 +203,25 @@ def main():
     print("Entered %s" % title)
 
     if load_weights and use_pickle:
-        pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
-                                        sess_info.title + '.pkl')
-        loader = meshNet_loader.DataLoader()
-        loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
+        # pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
+        #                                 sess_info.title + '.pkl')
+        # loader = meshNet_loader.DataLoader()
+        # loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
+        pass
     else:
         loader = meshNet_loader.DataLoader()
-        loader.load(sess_info.title,
-                    train_dir=train_dir,
+        loader.load(train_dir=train_dir,
                     test_dir=test_dir,
                     x_range=(0, 1),
-                    directional_gauss_blur=None,
+                    x_type=x_type,
+                    y_type=y_type,
                     part_of_data=part_of_data)
 
     # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 
     print("Getting model...")
     image_shape = loader.x_train.shape[1:]
-    # nb_outs = len(loader.y_train[0])
+    nb_outs = len(loader.y_train[0])
 
     # Custom loss is mandatory to take 360 degrees into consideration
     # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
@@ -221,7 +229,7 @@ def main():
     # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
     # model, model_name = meshNet_model.almost_VGG11_bn(**params)
     import posenet
-    params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'cyc_nb_outs': 2}
+    params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs-2}
     model, model_name = posenet.posenet_train(**params)
 
     if load_weights:
@@ -274,8 +282,8 @@ def main():
     # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=1, verbose=0)
     print('Test score:', test_score)
 
-    if not test_only:
-        loader.save_pickle(sess_info)
+    # if not test_only:
+    #     loader.save_pickle(sess_info)
 
     if history:
         visualize.visualize_history(history, sess_info, render_to_screen)

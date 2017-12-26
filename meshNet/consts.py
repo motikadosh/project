@@ -4,6 +4,8 @@ TOP_DIR = os.path.dirname(__file__) + os.sep
 
 OUTPUT_DIR = os.path.join(TOP_DIR, 'sessions_outputs')
 
+IMAGE_RANGE = (0, 255)
+
 # Dimensions are according to TensorFlow convention
 BATCH_DIMS_SAMPLES = 0
 BATCH_DIMS_ROWS = 1

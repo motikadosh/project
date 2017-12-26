@@ -61,6 +61,14 @@ def cyclic_loss_3(y_true, y_pred):
                      K.square(y_pred - y_true - 1)))
     return (1.0) * lcyc
 
+# TODO: READ http://www.boris-belousov.net/2016/12/01/quat-dist/
+
+# From: 3D Pose Regression using Convolutional Neural Networks - https://arxiv.org/abs/1708.05628
+# LOSS(R, R') = abs(arccos( 0.5*(trace(transpose(R) * R')-1) ))
+def rot_mat_loss1(y_true, y_pred):
+    K.abs( tf.acos( 0.5*() ))
+    pass
+
 
 def my_print_tensor(x, message=''):
     import tensorflow as tf
@@ -94,7 +102,7 @@ def my_print_tensor(x, message=''):
 #    return (1.0) * lcyc_dbg
 
 
-def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weights_path=None,
+def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, rot_nb_outs=2, weights_path=None,
                    tune=False):
     # creates Posenet from GoogLeNet a.k.a. Inception v1 (Szegedy, 2015)
     with tf.device('/cpu:0'):
@@ -202,7 +210,7 @@ def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weigh
 
         cls1_fc_pose_xyz = Dense(xy_nb_outs,name='cls1_fc_pose_xyz')(cls1_fc1_pose)
         
-        cls1_fc_pose_wpqr = Dense(cyc_nb_outs,name='cls1_fc_pose_wpqr')(cls1_fc1_pose)
+        cls1_fc_pose_wpqr = Dense(rot_nb_outs, name='cls1_fc_pose_wpqr')(cls1_fc1_pose)
 
 
 
@@ -295,7 +303,7 @@ def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weigh
         
         cls2_fc_pose_xyz = Dense(xy_nb_outs,name='cls2_fc_pose_xyz')(cls2_fc1)
         
-        cls2_fc_pose_wpqr = Dense(cyc_nb_outs,name='cls2_fc_pose_wpqr')(cls2_fc1)
+        cls2_fc_pose_wpqr = Dense(rot_nb_outs, name='cls2_fc_pose_wpqr')(cls2_fc1)
 
 
 
@@ -386,7 +394,7 @@ def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weigh
         
         cls3_fc_pose_xyz = Dense(xy_nb_outs,name='cls3_fc_pose_xyz')(cls3_fc1_pose)
         
-        cls3_fc_pose_wpqr = Dense(cyc_nb_outs,name='cls3_fc_pose_wpqr')(cls3_fc1_pose)
+        cls3_fc_pose_wpqr = Dense(rot_nb_outs, name='cls3_fc_pose_wpqr')(cls3_fc1_pose)
         
 
 
@@ -409,19 +417,37 @@ def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, cyc_nb_outs=2, weigh
     return posenet
 
 
-def posenet_train(image_shape, xy_nb_outs, cyc_nb_outs, optimizer=None, loss=None):
+def posenet_train(image_shape, xy_nb_outs, rot_nb_outs, optimizer=None, loss=None):
     model_name = posenet_train.__name__
 
     # Train model - GoogLeNet (Trained on Places)
-    model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, cyc_nb_outs=cyc_nb_outs)
+    model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, rot_nb_outs=rot_nb_outs)
+
+    if rot_nb_outs == 2:   # 'angle':
+        rot_loss_1 = cyclic_loss_1
+        rot_loss_2 = cyclic_loss_2
+        rot_loss_3 = cyclic_loss_3
+
+    elif rot_nb_outs == 4:  # 'quaternion':
+        rot_loss_1 = euc_loss1q
+        rot_loss_2 = euc_loss2q
+        rot_loss_3 = euc_loss3q
+
+    elif rot_nb_outs == 9:  # 'matrix':
+        rot_loss_1 = rot_mat_loss1
+        rot_loss_2 = rot_mat_loss1
+        rot_loss_3 = rot_mat_loss1
+
+    else:
+        raise Exception("Unknown rot_nb_outs value:", rot_nb_outs)
 
     if optimizer is None:
         optimizer = Adam(lr=0.001, clipvalue=1.5)  # Original
         # optimizer = Adadelta()
     if loss is None:
-        loss = {'cls1_fc_pose_xyz': euc_loss1x, 'cls1_fc_pose_wpqr': cyclic_loss_1,
-                'cls2_fc_pose_xyz': euc_loss2x, 'cls2_fc_pose_wpqr': cyclic_loss_2,
-                'cls3_fc_pose_xyz': euc_loss3x, 'cls3_fc_pose_wpqr': cyclic_loss_3}
+        loss = {'cls1_fc_pose_xyz': euc_loss1x, 'cls1_fc_pose_wpqr': rot_loss_1,
+                'cls2_fc_pose_xyz': euc_loss2x, 'cls2_fc_pose_wpqr': rot_loss_2,
+                'cls3_fc_pose_xyz': euc_loss3x, 'cls3_fc_pose_wpqr': rot_loss_3}
 
     model.compile(optimizer=optimizer, loss=loss)
 

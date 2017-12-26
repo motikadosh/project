@@ -1,3 +1,6 @@
+from __future__ import print_function
+from __future__ import division
+
 import os
 import time
 
@@ -18,6 +21,11 @@ USE_OPENCV = False
 
 
 def imshow(win_title, img):
+    img_range = (np.min(img), np.max(img))
+    if img.dtype in [np.float, np.float32, np.float64] and (img_range[0] < 0 or img_range[1] > 1):
+        print("Floating image not in [0, 1]. Converting to [0, 1]...")
+        img = utils.min_max_scale(img, img_range, (0, 1))
+
     if USE_OPENCV:
         cv2.imshow(win_title, img)
         key = cv2.waitKey(0) & 0xFF
