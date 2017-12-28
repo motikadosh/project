@@ -247,10 +247,12 @@ def process_labels(y_train, y_test, y_type):
         # This is the comment I inserted and the line I edited (Notice the atol=1.e-7):
         # Moti added bigger atol 1.e-7 instead of 1.e-8 to allow conversions of my rotation matrices
         # if not np.allclose(np.dot(R, R.conj().transpose()), np.eye(3), atol=1.e-7):
-        quaternion_train = np.array([Quaternion(matrix=item).normalised.elements for item in rot_mat_train])
+        quaternion_train = np.array([Quaternion(matrix=item).normalised.elements for item in rot_mat_train],
+                                    dtype=np.float32)
         y_train = np.concatenate((xy_train, quaternion_train), axis=1)
 
-        quaternion_test = np.array([Quaternion(matrix=item).normalised.elements for item in rot_mat_test])
+        quaternion_test = np.array([Quaternion(matrix=item).normalised.elements for item in rot_mat_test],
+                                   dtype=np.float32)
         y_test = np.concatenate((xy_test, quaternion_test), axis=1)
 
     elif y_type == 'matrix':
@@ -294,6 +296,10 @@ class DataLoader:
 
     def load(self, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(0, 1), y_range=(0, 1),
              x_type='edges', y_type='angle', part_of_data=1.0):
+
+        print("Load entered. train_dir [%s], test_dir [%s], image_size [%s], x_range [%s], y_range [%s], x_type [%s], "
+              "y_type [%s], part_of_data [%s]" % (train_dir, test_dir, image_size, x_range, y_range, x_type, y_type,
+                  part_of_data))
 
         self.train_dir = train_dir
         self.test_dir = test_dir

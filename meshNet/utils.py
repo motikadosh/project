@@ -162,6 +162,7 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
         params_prefix = cache_prefix + '_' + str(part_of_data)
         params_prefix += "_%sx%s" % (image_size[0], image_size[1]) if image_size is not None else ""
         params_prefix += "_r" if recursive else ""
+        print("Cache params_prefix:", params_prefix)
 
         if image_size is not None and os.path.isfile(params_prefix + "_x.npy") or \
                 image_size is None and os.path.isfile(params_prefix + "_file_urls.npy"):

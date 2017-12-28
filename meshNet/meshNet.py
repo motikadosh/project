@@ -27,8 +27,8 @@ import consts
 title = "meshNet"
 sess_info = utils.SessionInfo(title)
 
-sessions_outputs = '/home/moti/cg/project/sessions_outputs'
-# sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
+#sessions_outputs = '/home/moti/cg/project/sessions_outputs'
+sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
 
 # data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
 # data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
@@ -77,7 +77,7 @@ batch_size = 32
 save_best_only = True
 
 x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
-y_type = 'angle'  # 'angle', 'quaternion', 'matrix'
+y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 debug_level = 0
 
@@ -235,23 +235,25 @@ def main():
     if load_weights:
         meshNet_model.load_model_weights(model, weights_filename)
 
-    print("image_shape: ", image_shape)
-    # print("nb_outs: %d " % nb_outs)
-    print("Model name: ", model_name)
-    print("Model function input arguments: ", params)
-    print("Batch size: ", batch_size)
-    print("")
-
-    print("Model params number: ", model.count_params())
-    print("Model loss type: %s" % model.loss)
-    print("Model optimizer: ", model.optimizer)
-    print("")
-
-    print("y_min_max: ", loader.y_min_max)
-    print("y range: ", loader.y_min_max[1] - loader.y_min_max[0])
-    print("")
-
     model.summary()
+    print("")
+
+    print("image_shape:", image_shape)
+    print("nb_outs:", nb_outs)
+    print("Model name:", model_name)
+    print("Model function input arguments:", params)
+    print("Batch size:", batch_size)
+    print("")
+
+    print("Model params number:", model.count_params())
+    print("Model loss type: %s" % model.loss)
+    print("Model optimizer:", model.optimizer)
+    print("")
+
+    print("x_type:", loader.x_type)
+    print("y_type:", loader.y_type)
+    print("y_min_max:", loader.y_min_max)
+    print("y range:", loader.y_min_max[1] - loader.y_min_max[0])
     print("")
 
     if not test_only:
@@ -260,14 +262,14 @@ def main():
         callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
                                                  tensor_board=False)
 
-        history = model.fit(loader.x_train, [loader.y_train[:, 0:2], loader.y_train[:, 2:4],
-                                             loader.y_train[:, 0:2], loader.y_train[:, 2:4],
-                                             loader.y_train[:, 0:2], loader.y_train[:, 2:4]],
+        history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:],
+                                             loader.y_train[:, :2], loader.y_train[:, 2:],
+                                             loader.y_train[:, :2], loader.y_train[:, 2:]],
                             batch_size=batch_size, epochs=epochs, callbacks=callbacks,
                             validation_data=(loader.x_test,
-                                             [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                              loader.y_test[:, 0:2], loader.y_test[:, 2:4]]),
+                                             [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                              loader.y_test[:, :2], loader.y_test[:, 2:],
+                                              loader.y_test[:, :2], loader.y_test[:, 2:]]),
                             shuffle=True, initial_epoch=initial_epoch)
         # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
         # callbacks=callbacks, validation_data = (loader.x_test, loader.y_test), shuffle = True)
@@ -276,10 +278,10 @@ def main():
     else:
         history = None
 
-    test_score = model.evaluate(loader.x_test, [loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                loader.y_test[:, 0:2], loader.y_test[:, 2:4],
-                                loader.y_test[:, 0:2], loader.y_test[:, 2:4]], batch_size=1, verbose=0)
-    # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=1, verbose=0)
+    test_score = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                loader.y_test[:, :2], loader.y_test[:, 2:],
+                                loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
+    # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
     print('Test score:', test_score)
 
     # if not test_only:
