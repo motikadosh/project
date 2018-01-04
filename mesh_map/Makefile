@@ -3,12 +3,6 @@ TOPDIR := ..
 PLATFORM = common
 include $(TOPDIR)/$(PLATFORM).mak
 
-ifeq ($(LONG_MAKE),)
-	PSILENT = @
-else
-	PSILENT =
-endif
-
 BUILD_FOLDER ?= .build
 TARGET ?= mesh_map
 BIN_DIR ?= .

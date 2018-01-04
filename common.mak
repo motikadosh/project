@@ -2,11 +2,13 @@ CXX = g++
 CC = gcc
 LD = g++
 STRIP = strip
-
-DLIB_DIR ?= $(HOME)/dlib-18.18
-INC_DIR ?= /usr/include
-
 CCACHE_EXT ?= ccache
+
+ifeq ($(LONG_MAKE),)
+    PSILENT = @
+else
+    PSILENT =
+endif
 
 ARCH = $(shell uname -m)
 ifeq ($(ARCH),x86_64)
@@ -37,12 +39,12 @@ endif
 TRIMESH_DIR = ../trimesh2
 TRIMESH_LIB = $(TRIMESH_DIR)/lib.Linux64
 
+INC_DIR ?= /usr/include
 C_INC = \
     -I. \
     -I$(TOPDIR)/include \
     -I$(TOPDIR)/common \
     -I$(OPENCV_INC) \
-    -I$(DLIB_DIR) \
     -I$(TOPDIR)/external/cereal/include \
     -I$(INC_DIR)/eigen3 \
     -I$(INC_DIR)/glib-2.0 \
