@@ -11,6 +11,7 @@
 ###################
 *.pyc
 .idea
+.ipynb_checkpoints/
 
 # Packages #
 ############
@@ -43,15 +44,23 @@ ehthumbs.db
 Thumbs.db
 .*.swp
 
-
 # My files / Project specific #
 ###############################
 motiCommit
 project
 improc
 mesh_merge/mesh_merge
+mesh_map/mesh_map
 mesh_merge/output.obj
 meshNet/sessions_outputs/
 sample_images*/
 tags
 sessions_outputs
+berlin/
+
+# My data files / Project specific #
+###############################
+*.obj
+*.txt
+*.png
+
