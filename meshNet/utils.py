@@ -5,6 +5,7 @@ import os
 import errno
 import pickle
 import shutil
+import random
 
 from contextlib import contextmanager
 from datetime import datetime
@@ -21,12 +22,12 @@ def get_timestamp():
 
 
 class SessionInfo:
-    def __init__(self, title, out_dir=None):
+    def __init__(self, title, out_dir=None, postfix=None):
         self.title = title
-        if out_dir is None:
-            self.out_dir = self.title + '_' + get_timestamp()
-        else:
-            self.out_dir = out_dir
+
+        self.out_dir = (self.title + '_' + get_timestamp()) if out_dir is None else out_dir
+        if postfix is not None:
+            self.out_dir += postfix
 
 
 def mkdirs(full_path):
@@ -146,8 +147,8 @@ def part_of(*arrays, **options):
     return tuple(res_arrays) if len(arrays) > 1 else res_arrays[0]
 
 
-def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.0, sort_by_name=False, recursive=False,
-                save_cache=True, skip_upscale=False, labels_parser=None, process_image_fn=None):
+def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.0, shuffle=False, sort_by_name=False,
+                recursive=False, save_cache=True, skip_upscale=False, labels_parser=None, process_image_fn=None):
     print("Loading folder [%s], image_size [%s], part_of_data [%s], sort_by_name [%s], recursive [%s], save_cache [%s]"
           % (folder, image_size, part_of_data, sort_by_name, recursive, save_cache))
 
@@ -177,6 +178,10 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
         else:
             print("Loading files...")
             files = get_files_with_ext(db_path, ext_list=ext_list, recursive=recursive, sort=sort_by_name)
+
+            if shuffle:
+                print("Shuffling [%d] files before load..." % len(files))
+                random.shuffle(files)
 
             files = part_of(files, part=part_of_data)
 

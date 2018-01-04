@@ -174,14 +174,9 @@ def get_map_view(data_dir, p1, p2):
     return img_map
 
 
-# asc=np.argsort(xy_error_train)
-# dsc=np.argsort(xy_error_train)[::-1]
-# idx = 0
-# xy_error_train[asc][idx]
-# see_view(loader, loader.x_train[asc], loader.y_train[asc], idx)
-# see_view(loader, loader.x_train[asc], y_train_pred[asc], idx)
-def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=True, by_xy=True, normalized=False,
+def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx, is_train=True, normalized=False,
                     asc=True, figure_num=99):
+
     if is_train:
         y = loader.y_train
         y_pred = y_train_pred
@@ -189,8 +184,7 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=T
         y = loader.y_test
         y_pred = y_test_pred
 
-    # FIXME: Add arg for combined error
-    # errors = np.linalg.norm(y - y_pred, axis=-1)
+    normalized_errors = np.linalg.norm(y - y_pred, axis=-1)
 
     if not normalized:
         y = loader.y_inverse_transform(y)
@@ -199,7 +193,15 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=T
     xy_errors = utils.xy_dist(y[:, :2], y_pred[:, :2])
     angle_errors = utils.angle_l2_err(y[:, 2:], y_pred[:, 2:], normalized)
 
-    errors = xy_errors if by_xy else angle_errors
+    if errors_by == 'xy':
+        errors = xy_errors
+    elif errors_by == 'angle':
+        errors = angle_errors
+    elif errors_by == 'comb':
+        errors = normalized_errors
+    else:
+        raise Exception("Unknown errors_by argument")
+
     sort_idx = np.argsort(errors) if asc else np.argsort(errors)[::-1]
 
     y_single = y[sort_idx][idx]
@@ -219,7 +221,12 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=T
 
     img_org = cv2.cvtColor(img_org, cv2.COLOR_BGR2RGB)
     img_pred = cv2.cvtColor(img_pred, cv2.COLOR_BGR2RGB)
-    img_train = cv2.cvtColor(loader.x_train[sort_idx][idx], cv2.COLOR_GRAY2RGB)
+
+    # The complex line efficient by far (It avoids copying the sorted image array)
+    # x_input = loader.x_train[sort_idx][idx]
+    x_input = loader.x_train[np.arange(len(loader.x_train))[sort_idx][idx]]
+
+    img_train = cv2.cvtColor(x_input, cv2.COLOR_GRAY2RGB)
     img_map = cv2.cvtColor(img_map, cv2.COLOR_BGR2RGB)
 
     multiple_plots(figure_num, 2, 2, 1)
@@ -239,10 +246,11 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx, is_train=T
     plt.title('Map')
 
     angle_diff = utils.angle_diff(y_single[2:], y_pred_single[2:])
-    plt.suptitle("idx = %i/%i (%s), xy_err=%s, yaw_err=%s, pitch_err=%s, angle_l2=%s" %
-                 (idx if asc else len(errors) - 1 - idx, len(errors) - 1, 'asc' if asc else 'desc',
+    plt.suptitle("idx = %i/%i (%s,%s), errors: xy=%s, yaw=%s, pitch=%s, angle_l2=%s, comb=%s" %
+                 (idx if asc else len(errors) - 1 - idx, len(errors) - 1, 'asc' if asc else 'desc', errors_by,
                   xy_errors[sort_idx][idx],
-                  angle_diff[0], angle_diff[1], angle_errors[sort_idx][idx]))  # , fontsize=16)
+                  angle_diff[0], angle_diff[1], angle_errors[sort_idx][idx],
+                  normalized_errors[sort_idx][idx]))  # , fontsize=16)
 
     plt.show()
 

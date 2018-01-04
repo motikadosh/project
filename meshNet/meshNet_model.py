@@ -118,7 +118,7 @@ class myModelCheckpoint(Callback):
                 current = logs.get(self.monitor)
                 if current is None:
                     warnings.warn('Can save best model only with %s available, '
-                                  'skipping.' % (self.monitor), RuntimeWarning)
+                                  'skipping.' % self.monitor, RuntimeWarning)
                 else:
                     if self.monitor_op(current, self.best):
                         if self.verbose > 0:
@@ -175,14 +175,17 @@ def get_checkpoint(sess_info, is_classification, save_best_only=True, tensor_boa
         monitor = "val_loss"
         extra_params = ""
 
-    hdf5_fname = sess_info.title + "_weights.e{epoch:03d}-loss{loss:.5f}-vloss{val_loss:.4f}" + extra_params + ".hdf5"
+    hdf5_fname = sess_info.title + "_best_val_loss" + "_weights.e{epoch:03d}-loss{loss:.5f}-vloss{val_loss:.4f}" +\
+        extra_params + ".hdf5"
     hdf5_full_path = os.path.join(hdf5_dir, hdf5_fname)
-
     model_cp = myModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only, monitor=monitor)
     res_cbs.append(model_cp)
 
     if monitor_also_loss:
-        model_loss_cp = myModelCheckpoint(filepath=hdf5_full_path, verbose=0, save_best_only=save_best_only,
+        loss_hdf5_fname = sess_info.title + "_best_loss" + "_weights.e{epoch:03d}-loss{loss:.5f}-vloss{val_loss:.4f}" +\
+                          extra_params + ".hdf5"
+        loss_hdf5_full_path = os.path.join(hdf5_dir, loss_hdf5_fname)
+        model_loss_cp = myModelCheckpoint(filepath=loss_hdf5_full_path, verbose=0, save_best_only=save_best_only,
                                           monitor="loss")
         res_cbs.append(model_loss_cp)
 

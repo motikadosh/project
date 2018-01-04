@@ -23,12 +23,8 @@ import consts
 # Not used in code, for easier interactive debugging
 # import matplotlib.pyplot as plt
 
-# Script config
-title = "meshNet"
-sess_info = utils.SessionInfo(title)
-
-#sessions_outputs = '/home/moti/cg/project/sessions_outputs'
-sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
+sessions_outputs = '/home/moti/cg/project/sessions_outputs'
+# sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
 
 # data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
 # data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
@@ -51,21 +47,36 @@ test_dir = os.path.join(data_dir, 'test')
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5'
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_28-13_53_12-100Epochs_Berlin_ROI_Grid200_NoAngles/hdf5/meshNet_weights.e093-loss0.07357-vloss0.5875.hdf5'
 
-# 200
+# 200 - Single angle
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-12_40_01-100Epochs_Grid200_Batch4/hdf5/meshNet_weights.e098-loss0.07383-vloss0.4329.hdf5'
 
-# 400
+# 400 - Single angle
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5'
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5'
 
-# angle only
+# Angle only - Single XY
 # weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_13-12_40_52-100Epochs_anglesOnly_Batch8/hdf5/meshNet_weights.e090-loss0.00323-vloss0.0023.hdf5'
 
-# 200 - FULL
-weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5'
+# 200 - XY+Angles - Upper 1/3
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5'
+
+# 200- XY+Angles + Entire image + Edges - angles
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_31-08_53_29-41Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/meshNet_weights.e038-loss0.09036-vloss0.1261.hdf5'
+
+# 200- XY+Angles + Entire image + Edges_and_faces - angles
+# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_27-00_21_50_55Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces/hdf5/meshNet_weights.e026-loss0.08365-vloss0.1302.hdf5'
+
+# 200- XY+Angles + Entire image + Edges_and_faces - quaternions
+weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_28-09_50_03_100Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces_quternions/hdf5/meshNet_weights.e039-loss42.69920-vloss97.8118.hdf5'
+
+
+# TODO: Can this be inferred in case we are just testing?
+x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
+y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_pickle = False
 render_to_screen = False
+evaluate = True
 test_only = False
 load_weights = False
 initial_epoch = 0  # Should have the weights Epoch number + 1
@@ -76,17 +87,14 @@ if test_only:
 batch_size = 32
 save_best_only = True
 
-x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
-y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
-
 debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
     epochs = 100
 elif debug_level == 1:  # Medium Debug
-    part_of_data = 0.3
-    epochs = 15
+    part_of_data = 0.1
+    epochs = 2
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
     epochs = 2
@@ -98,7 +106,7 @@ def predict(model, x):
     # Predict each test sample and measure total time
 
     start_time = time.time()
-    predictions = model.predict(x, batch_size=1, verbose=0)
+    predictions = model.predict(x, batch_size=128, verbose=0)
     total_time = time.time() - start_time
     print("Prediction of %d samples took %s seconds. I.e. %s seconds per sample" %
           (x.shape[0], total_time, total_time / x.shape[0]))
@@ -159,8 +167,8 @@ def detailed_evaluation(model, loader, posenet_output=3):
     xy_error_test, angle_error_test = calc_stats(loader, loader.y_test, y_test_pred, normalized=False,
                                                  dataset_name='Test')
 
-    # for i in xrange(5):
-    #    visualize.view_prediction(data_dir, loader, y_train_pred, y_test_pred, idx=i, is_train=True, by_xy=True,
+    # for i in [0, 1, 2, 3, 100, 1000, 3000, 5400, len(y_train_pred)-1]:
+    #    visualize.view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
     #                              normalized=False, asc=False, figure_num=i)
 
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
@@ -198,6 +206,12 @@ def detailed_evaluation(model, loader, posenet_output=3):
         print("Warning: {}".format(e))
 
 
+# Script config
+title = "meshNet"
+sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else None)
+
+
+# TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
 def main():
     logger.Logger(sess_info)
     print("Entered %s" % title)
@@ -258,7 +272,6 @@ def main():
 
     if not test_only:
         print("Training model...")
-        # TODO: Consider adding custom callback to monitor each loss separately and save best epochs accordingly
         callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
                                                  tensor_board=False)
 
@@ -278,11 +291,16 @@ def main():
     else:
         history = None
 
-    test_score = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                loader.y_test[:, :2], loader.y_test[:, 2:],
-                                loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
-    # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
-    print('Test score:', test_score)
+    if evaluate:
+        print("Evaluating model. Test shape", loader.y_test.shape)
+        test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                    loader.y_test[:, :2], loader.y_test[:, 2:],
+                                    loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
+        # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
+
+        print('Evaluate results:')
+        for i, metric in enumerate(model.metrics_names):
+            print(metric, ":", test_scores[i])
 
     # if not test_only:
     #     loader.save_pickle(sess_info)
