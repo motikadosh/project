@@ -3,19 +3,13 @@ TOPDIR := ..
 PLATFORM = common
 include $(TOPDIR)/$(PLATFORM).mak
 
-ifeq ($(LONG_MAKE),)
-	PSILENT = @
-else
-	PSILENT =
-endif
-
 BUILD_FOLDER ?= .build
 TARGET ?= mesh_merge
 BIN_DIR ?= .
 
 # Source files
 OBJECTS += $(addprefix $(BUILD_FOLDER)/, \
-        main.o)
+        mesh_merge.o)
 
 all: $(BIN_DIR)/$(TARGET)
 
