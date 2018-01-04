@@ -150,7 +150,7 @@ class OrthoData:
 
 
 def get_map_view(data_dir, p1, p2):
-    map_file_path = os.path.join(data_dir, 'gExportsMap.png')
+    map_file_path = os.path.join(data_dir, 'gSamplesMap.png')
     img_map = cv2.imread(map_file_path)
 
     orth_data = OrthoData(data_dir)

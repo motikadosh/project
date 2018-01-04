@@ -36,7 +36,7 @@ else
     OPENCV_INC = /usr/local/include
 endif
 
-TRIMESH_DIR = ../trimesh2
+TRIMESH_DIR ?= ../trimesh2
 TRIMESH_LIB = $(TRIMESH_DIR)/lib.Linux64
 
 INC_DIR ?= /usr/include

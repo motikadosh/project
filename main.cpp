@@ -64,8 +64,9 @@ DEFINE_string(pose, "", "Pose string to use as start-up. Format: \"x y z yaw pit
 DEFINE_string(single, "", "Show single image and exit. Used when program is called from Python with some pose");
 //DEFINE_string(xf, "", "Path to XF transformation to use at start-up");
 DEFINE_string(output_dir, "", "Output directory name. In case of empty string, auto directory is created");
-DEFINE_bool(resume_export, false, "Use check_point.txt to resume samples export");
+DEFINE_bool(export_resume, false, "Use check_point.txt to resume samples export");
 DEFINE_int32(export_mode, 0, "0-Export train and test. 1-Export train only. 2-Export test only");
+DEFINE_int32(export_third, 0, "0-All . 1-1st third. 2-2nd third. 3-3rd third");
 
 DEFINE_int32(sample_yaw_range, 360, "Range of angles for yaw sampling");
 DEFINE_int32(sample_yaw_step, 5, "Step size for yaw sampling");
@@ -75,16 +76,16 @@ DEFINE_int32(sample_pitch_step, -3, "Step size for pitch sampling");
 DEFINE_bool(random_sampling, false, "Use random sampling or not");
 DEFINE_int32(samples_num, 300, "Number of (x, y) pts to sample in auto navigation");
 DEFINE_double(test_percent, 0.2, "Test percent");
-DEFINE_int32(grid, 20, "Number of (x, y) pts to sample on each grid row in auto navigation, column is induced");
+DEFINE_double(grid_step, 20.0, "Step size between each two (x, y) pts in 3D model units");
 DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
 DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
 DEFINE_bool(sample_pos_only, false, "No angle (yaw/pitch) sampling is made - for debugging");
 DEFINE_string(sample_rect, "", "Rect in map dimentions to perform sampling. Format: \"x y width height\"");
 DEFINE_string(sample_angle_only, "", "Single x,y in map dimentions to perform all angles sampling");
 
-DEFINE_double(crop_upper_part, 0.33333, "Part of image to crop from top. 0- ignore");
+DEFINE_double(crop_upper_part, 0 /*0.33333*/, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
-DEFINE_int32(min_edges_threshold, 4, "Minimum number of edges for sample exporting");
+DEFINE_int32(min_edges_threshold, 8, "Minimum number of edges for sample exporting");
 DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage for sample exporting");
 DEFINE_double(min_sky_precent, 0.5, "Minimum of most upper line to be BG - I.e. Sky");
 //DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
@@ -2170,12 +2171,6 @@ void setAutoNavState(bool newState)
 
 void handleNavKeyboard(int key)
 {
-    if (gAutoNavigation && key != 'g')
-    {
-        DBG("Nav commands not allowd in autoNavigation mode. Press 'g' to exit this mode");
-        return;
-    }
-
     if (key >= '0' && key <= '9')
     {
         std::string xfFile = trimesh::replace_ext(xfFileName, "") + std::string((const char *)&key) + ".xf";
@@ -2200,10 +2195,6 @@ void handleNavKeyboard(int key)
         break;
     case 'u':
         upperView();
-        break;
-
-    case 'g':
-        setAutoNavState(!gAutoNavigation);
         break;
 
     case 'k':
@@ -2427,8 +2418,18 @@ void handleKeyboard(int key)
 
     //DBG("key [" << key << "], char [" << (char)key << "]");
 
+    if (gAutoNavigation && key != 'g')
+    {
+        DBG("Nav commands not allowd in autoNavigation mode. Press 'g' to exit this mode");
+        return;
+    }
+
     switch (key)
     {
+    case 'g':
+        setAutoNavState(!gAutoNavigation);
+        return;
+
     case 'n':
         gKeysGroup = KEYS_GROUP_NAV;
         cv::setMouseCallback(MAIN_WINDOW_NAME, mouseNavCallbackFunc, NULL);
@@ -2652,13 +2653,8 @@ void populateXfVector()
         }
         else
         {
-#ifdef ROUND_SAMPLING
-            float stepX = rad * 2 / FLAGS_grid;
-            float stepY = rad * 2 / FLAGS_grid;
-#else
-            float stepX = width / FLAGS_grid;
-            float stepY = height / FLAGS_grid;
-#endif
+            float stepX = FLAGS_grid_step;
+            float stepY = FLAGS_grid_step;
             DBG("stepX [" << stepX << "], stepY [" << stepY << "]");
 
             for (float x = xMin; x < xMax; x += stepX)
@@ -2882,7 +2878,7 @@ bool checkAndSaveCurrentSceen(const std::string &filePath,
 void saveCheckPoint(const std::string &outDir, const std::string &modelFileName, bool isTrain,
     unsigned autoNavigationIdx, int exportsNum, int skipsNum)
 {
-    // TODO: Should probably check if file already exist and refuse to overwrite it if resume_export is not set
+    // TODO: Should probably check if file already exist and refuse to overwrite it if export_resume is not set
     std::string checkPointFile(outDir + CHECK_POINT_FNAME);
     std::ofstream outputFile(checkPointFile, std::ofstream::trunc);
     if (!outputFile.is_open())
@@ -2950,6 +2946,37 @@ cv::Mat createAnglesExportGraph()
     return graph;
 }
 
+void anglesGraphAddPoint(cv::Mat &anglesGraph, float yaw, float pitch, const cv::Scalar &color, bool show = false)
+{
+    cv::circle(anglesGraph, cv::Point(yaw * 2 + 30, anglesGraph.rows + 4 * pitch - 30), 3, color, CV_FILLED);
+    if (show)
+        cv::imshow("gAnglesExport", gAnglesExport);
+}
+
+void updateUpperMapShow()
+{
+    cv::Mat upperMapShow = gSamplesMap.clone();
+
+    // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
+    trimesh::xform xfInv = inv(xf);
+    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
+    //DBG("xf\n" << xf);
+    //DBG("xfInv\n" << xfInv);
+
+    cv::circle(upperMapShow,
+        gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size()),
+        (gSamplesROI.width / FLAGS_win_width) * 8, azul, CV_FILLED);
+
+    cv::resize(upperMapShow(gSamplesROI), upperMapShow,
+        cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
+
+    //std::stringstream ss;
+    //ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
+    //myPutText(upperMapShow, ss, cv::Point(5, 10));
+
+    cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
+}
+
 void autoNavigate()
 {
     DBG_T("Entered");
@@ -2959,16 +2986,16 @@ void autoNavigate()
     static int sSkipsNum = 0;
     static int sIsFirstRun = true;
 
-    if (gExportsMap.empty())
-        gExportsMap = gSamplesMap.clone();
+    //if (gExportsMap.empty())
+    //    gExportsMap = gSamplesMap.clone();
     if (gAnglesExport.empty())
         gAnglesExport = createAnglesExportGraph();
 
-    if (FLAGS_resume_export)
+    if (FLAGS_export_resume)
     {
         loadCheckPoint(FLAGS_output_dir, getFileName(FLAGS_model), sIsTrain, gAutoNavigationIdx, sExportsNum,
             sSkipsNum);
-        FLAGS_resume_export = false;
+        FLAGS_export_resume = false;
     }
 
     std::vector<trimesh::xform> &xfSamples = sIsTrain ? gDataSet["train"].xfSamples : gDataSet["test"].xfSamples;
@@ -2976,87 +3003,86 @@ void autoNavigate()
 
     if (sIsFirstRun)
     {
+        if (FLAGS_export_third && gAutoNavigationIdx <= (FLAGS_export_third - 1) * samplesData.size() / 3)
+            gAutoNavigationIdx = (FLAGS_export_third - 1) * samplesData.size() / 3;
+
+        makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
+
+        // Export gOrthoProjData
+        std::string orthoDataOutFilePath = FLAGS_output_dir + "map_ortho_data.txt";
+        gOrthoProjData.write(orthoDataOutFilePath);
+
         // Return to main loop to have the current sample XF rendered before continuing
         xf = xfSamples[gAutoNavigationIdx];
         //DBG("xf:\n" << xf);
         sIsFirstRun = false;
+
+        updateUpperMapShow();
+
         DBG("First Run. sIsTrain [" << sIsTrain << "]");
         return;
     }
 
-    cv::Mat exportsMap4Show;
-    if (!gAutoNavigationIdx)
+    // Take screen-shot of current pose and save the XF file in identical fileName
+    std::stringstream ssDirName;
+    ssDirName << FLAGS_output_dir << (sIsTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
+        samplesData[gAutoNavigationIdx].x << "_" << samplesData[gAutoNavigationIdx].y << FS_DELIMITER_LINUX;
+    makeDir(ssDirName.str());
+
+    std::stringstream ssNum;
+    ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx;
+    std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
+
+    cv::Scalar angleColor;
+
+    if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
     {
-        makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
+        // Image is OK and was saved. Write also image data
+        samplesData[gAutoNavigationIdx].write(sampleFilePathNoExt + ".txt");
+        xf.write(sampleFilePathNoExt + ".xf");
+
+        sExportsNum++;
+        angleColor = green;
     }
     else
     {
-        // Skip 1st entry here since it is the pose before starting autoNavigation
-        // FIXME: The last image will not be taken. Probably not worth fixing.
+        //if (FLAGS_sample_pos_only)
+        //{
+        //    cv::circle(gExportsMap,
+        //        gOrthoProjData.convertWorldPointToMap(cv::Point3f(samplesData[gAutoNavigationIdx].x,
+        //        samplesData[gAutoNavigationIdx].y, samplesData[gAutoNavigationIdx].z), gModelMap.size()),
+        //        3, sIsTrain ? red : orange, CV_FILLED);
+        //}
+        sSkipsNum++;
+        angleColor = red;
+    }
 
-        // Take screen-shot of current pose and save the XF file in identical fileName
-        std::stringstream ssDirName;
-        ssDirName << FLAGS_output_dir << (sIsTrain ? "train" : "test") << FS_DELIMITER_LINUX <<
-            samplesData[gAutoNavigationIdx].x << "_" << samplesData[gAutoNavigationIdx].y << FS_DELIMITER_LINUX;
-        makeDir(ssDirName.str());
+    anglesGraphAddPoint(gAnglesExport, samplesData[gAutoNavigationIdx].yaw, samplesData[gAutoNavigationIdx].pitch,
+        angleColor, true);
 
-        std::stringstream ssNum;
-        ssNum << std::setfill('0') << std::setw(6) << gAutoNavigationIdx;
-        std::string sampleFilePathNoExt = ssDirName.str() + "pose_" + ssNum.str();
+    // If is last or next sample has different XY - Save angles exports graph to disk
+    if (gAutoNavigationIdx == samplesData.size() - 1 ||
+        samplesData[gAutoNavigationIdx].x != samplesData[gAutoNavigationIdx + 1].x ||
+        samplesData[gAutoNavigationIdx].y != samplesData[gAutoNavigationIdx + 1].y)
+    {
+        std::string anglesExportGraphFilePath = ssDirName.str() + "gAnglesExport.png";
+        if (!cv::imwrite(anglesExportGraphFilePath, gAnglesExport))
+            std::cout << "Failed saving gAnglesExport to [" << anglesExportGraphFilePath << "]" << std::endl;
 
-        cv::Scalar angleColor;
+        // Reset angles graph
+        gAnglesExport = createAnglesExportGraph();
+    }
 
-        if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
-        {
-            // Image is OK and was saved. Write also image data
-            samplesData[gAutoNavigationIdx].write(sampleFilePathNoExt + ".txt");
-            xf.write(sampleFilePathNoExt + ".xf");
+    //cv::Mat exportsMap4Show;
+    //cv::resize(gExportsMap(gSamplesROI), exportsMap4Show,
+    //    cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
+    //cv::imshow(EXPORT_MAP_WINDOW_NAME, exportsMap4Show);
 
-            sExportsNum++;
-            angleColor = green;
-        }
-        else
-        {
-            if (FLAGS_sample_pos_only)
-            {
-                cv::circle(gExportsMap,
-                    gOrthoProjData.convertWorldPointToMap(cv::Point3f(samplesData[gAutoNavigationIdx].x,
-                    samplesData[gAutoNavigationIdx].y, samplesData[gAutoNavigationIdx].z), gModelMap.size()),
-                    3, sIsTrain ? red : orange, CV_FILLED);
-            }
-            sSkipsNum++;
-            angleColor = red;
-        }
-
-        cv::circle(gAnglesExport,
-            cv::Point(samplesData[gAutoNavigationIdx].yaw * 2 + 30,
-            gAnglesExport.rows + 4 * samplesData[gAutoNavigationIdx].pitch - 30),
-            3, angleColor, CV_FILLED);
-        imshowAndWait(gAnglesExport, 1, "gAnglesExport", false);
-
-        // If is last or next sample has different XY - Save angles exports graph to disk
-        if (gAutoNavigationIdx == samplesData.size() - 1 ||
-            samplesData[gAutoNavigationIdx].x != samplesData[gAutoNavigationIdx + 1].x ||
-            samplesData[gAutoNavigationIdx].y != samplesData[gAutoNavigationIdx + 1].y)
-        {
-            std::string anglesExportGraphFilePath = ssDirName.str() + "gAnglesExport.png";
-            if (!cv::imwrite(anglesExportGraphFilePath, gAnglesExport))
-                std::cout << "Failed saving gAnglesExport to [" << anglesExportGraphFilePath << "]" << std::endl;
-
-            // Reset angles graph
-            gAnglesExport = createAnglesExportGraph();
-        }
-
-        cv::resize(gExportsMap(gSamplesROI), exportsMap4Show,
-            cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
-        cv::imshow(EXPORT_MAP_WINDOW_NAME, exportsMap4Show);
-
-        // Sanity
-        if (xf != xfSamples[gAutoNavigationIdx])
-        {
-            throw std::runtime_error("Somehow the XF was modified before we returned here. This might suggest the "
-                "rendered image is not we think");
-        }
+    // Sanity
+    if (xf != xfSamples[gAutoNavigationIdx])
+    {
+        throw std::runtime_error("Somehow the XF was modified before we returned here. This might suggest the "
+            "rendered image is not we think");
     }
 
     gAutoNavigationIdx++;
@@ -3066,10 +3092,15 @@ void autoNavigate()
         DBG("sample [#" << gAutoNavigationIdx << "/" << samplesData.size() << "], dataSet [" <<
             (sIsTrain ? "Train" : "Test") << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum <<
             "], samplesData [" << samplesData[gAutoNavigationIdx] << "]");
+    }
 
-        // FIXME: Should save checkpoint each new dir. This will also gaurntee the integrity of the anglesExportGraph
-        saveCheckPoint(FLAGS_output_dir, getFileName(FLAGS_model), sIsTrain, gAutoNavigationIdx, sExportsNum,
-            sSkipsNum);
+    if (FLAGS_export_third && gAutoNavigationIdx == FLAGS_export_third * samplesData.size() / 3)
+    {
+        DBG("Done exporting [" << FLAGS_export_third << "] third of [" << (sIsTrain ? "train" : "test") << "] set");
+        DBG("Projections num [" << xfSamples.size() / 3 << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" <<
+            sSkipsNum << "]");
+        setAutoNavState(false);
+        return;
     }
 
     if (gAutoNavigationIdx == xfSamples.size())
@@ -3094,25 +3125,33 @@ void autoNavigate()
         sIsFirstRun = true;
 
         //if (FLAGS_sample_pos_only)
-        if (1)
-        {
+        //if (1)
+        //{
             // Save exports maps to disk
-            std::string exportsMap4showFilePath = FLAGS_output_dir + "exportsMap4Show.png";
-            if (!cv::imwrite(exportsMap4showFilePath, exportsMap4Show))
-                std::cout << "Failed saving exportsMap4Show to [" << exportsMap4showFilePath << "]" << std::endl;
-            std::string exportsMapFilePath = FLAGS_output_dir + "gExportsMap.png";
-            if (!cv::imwrite(exportsMapFilePath, gExportsMap))
-                std::cout << "Failed saving exportsMap4Show to [" << exportsMapFilePath << "]" << std::endl;
-        }
+            //std::string exportsMap4showFilePath = FLAGS_output_dir + "exportsMap4Show.png";
+            //if (!cv::imwrite(exportsMap4showFilePath, exportsMap4Show))
+            //    std::cout << "Failed saving exportsMap4Show to [" << exportsMap4showFilePath << "]" << std::endl;
+            //std::string exportsMapFilePath = FLAGS_output_dir + "gExportsMap.png";
+            //if (!cv::imwrite(exportsMapFilePath, gExportsMap))
+            //    std::cout << "Failed saving exportsMap4Show to [" << exportsMapFilePath << "]" << std::endl;
+        //}
 
-        // Export gOrthoProjData
-        std::string orthoDataOutFilePath = FLAGS_output_dir + "map_ortho_data.txt";
-        gOrthoProjData.write(orthoDataOutFilePath);
     }
     else
     {
         xf = xfSamples[gAutoNavigationIdx];
         //DBG("xf:\n" << xf);
+
+        // New X,Y position
+        if (samplesData[gAutoNavigationIdx].x != samplesData[gAutoNavigationIdx - 1].x ||
+            samplesData[gAutoNavigationIdx].y != samplesData[gAutoNavigationIdx - 1].y)
+        {
+            updateUpperMapShow();
+
+            // Saving checkpoint each new dir(Position) gaurntees integrity of anglesExportGraph
+            saveCheckPoint(FLAGS_output_dir, getFileName(FLAGS_model), sIsTrain, gAutoNavigationIdx, sExportsNum,
+                sSkipsNum);
+        }
     }
 
     DBG_T("Done");
@@ -3149,30 +3188,6 @@ void initGoogleLogs(const std::string &appName)
     google::InitGoogleLogging(appName.c_str());
 }
 
-void updateUpperMapShow()
-{
-    cv::Mat upperMapShow = gSamplesMap.clone();
-
-    // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
-    trimesh::xform xfInv = inv(xf);
-    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
-    //DBG("xf\n" << xf);
-    //DBG("xfInv\n" << xfInv);
-
-    cv::circle(upperMapShow,
-        gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size()),
-        (gSamplesROI.width / FLAGS_win_width) * 8, azul, CV_FILLED);
-
-    cv::resize(upperMapShow(gSamplesROI), upperMapShow,
-        cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
-
-    //std::stringstream ss;
-    //ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
-    //myPutText(upperMapShow, ss, cv::Point(5, 10));
-
-    cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
-}
-
 void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdata)
 {
     if (event == cv::EVENT_LBUTTONDOWN)
@@ -3181,7 +3196,7 @@ void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdat
         cv::Point userMapP = cv::Point(x, y) + gSamplesROI.tl();
         DBG("userMapP: " << userMapP << ", x,y: " << cv::Point(x, y) << "gSamplesROI tl: " << gSamplesROI.tl());
 
-        unsigned minDistIdx;
+        unsigned minDistIdx = 0;
         double minDist = std::numeric_limits<double>::max();
         for (unsigned i = 0; i < gDataSet["train"].samplesData.size(); i++)
         {
@@ -3237,6 +3252,9 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
+    if (FLAGS_export_third != 0 && FLAGS_export_mode == 0)
+        throw std::invalid_argument("Invalid arg -export_third. Cannot be used on all data-set");
+
     DBG_T("Entered. exe [" << argv[0] << "], current gFlags [" << GFLAGS_NAMESPACE::CommandlineFlagsIntoString() <<
         "]");
 
@@ -3291,10 +3309,11 @@ int main(int argc, char* argv[])
     {
         for (;;)
         {
-            updateUpperMapShow();
+            if (!gAutoNavigation) // Heavy. Support position move to samples with mouse
+                updateUpperMapShow();
             updateWindows();
 
-            int key = cv::waitKey(gAutoNavigation ? 1 : 33); //33);
+            int key = cv::waitKey(gAutoNavigation ? 1 : 33);
             if (key == 27) // ESC key
                 break;
 
