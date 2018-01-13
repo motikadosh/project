@@ -112,6 +112,9 @@ def plot_line(x, title='Line', ylabel=None, show=True):
 
 
 def render_view(pose):
+    if len(pose) != 4:
+        raise Exception("Pose must be of the form (x,y,yaw,pitch)")
+
     view_str = "%f %f %f %f %f %f" % (pose[0], pose[1], 9999, pose[2], pose[3], 0)
 
     print("Calling PROJECT with pose %s" % view_str)
@@ -149,7 +152,7 @@ class OrthoData:
         return int(round(map_x)), int(round(map_y))
 
 
-def get_map_view(data_dir, p1, p2):
+def get_map_view(data_dir, p1, p2, roi=None):
     map_file_path = os.path.join(data_dir, 'gSamplesMap.png')
     img_map = cv2.imread(map_file_path)
 
@@ -158,25 +161,28 @@ def get_map_view(data_dir, p1, p2):
     map_p2 = orth_data.convert_world_point_to_map(p2, img_map.shape)
 
     # cv_azul_color = (255, 255, 0)
-    cv_green_color = (0, 255, 0)
+    # cv_green_color = (0, 255, 0)
     cv_red_color = (0, 0, 255)
-    cv2.circle(img_map, center=map_p1, radius=8, color=cv_green_color, thickness=cv2.FILLED)
-    cv2.circle(img_map, center=map_p2, radius=8, color=cv_red_color, thickness=cv2.FILLED)
+    cv_yellow_color = (45, 205, 243)
 
-    crop = True
-    if crop:
-        left = 4400
-        top = 5500
-        width = 800
-        height = 800
+    cv2.circle(img_map, center=map_p1, radius=12, color=cv_yellow_color, thickness=cv2.FILLED)
+    cv2.circle(img_map, center=map_p2, radius=12, color=cv_red_color, thickness=cv2.FILLED)
+
+    if roi is not None:
+        left, top, width, height = roi
         img_map = img_map[top:top + height, left:left + width]
 
     return img_map
 
 
-def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx, is_train=True, normalized=False,
+# make view_prediction() local:
+# import cv2
+# import matplotlib.pyplot as plt
+# from visualize import render_view
+# from visualize import get_map_view
+# from visualize import multiple_plots
+def view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by, idx, is_train=True, normalized=False,
                     asc=True, figure_num=99):
-
     if is_train:
         y = loader.y_train
         y_pred = y_train_pred
@@ -191,7 +197,7 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx,
         y_pred = loader.y_inverse_transform(y_pred)
 
     xy_errors = utils.xy_dist(y[:, :2], y_pred[:, :2])
-    angle_errors = utils.angle_l2_err(y[:, 2:], y_pred[:, 2:], normalized)
+    angle_errors = utils.rotation_error(y[:, 2:], y_pred[:, 2:], normalized)
 
     if errors_by == 'xy':
         errors = xy_errors
@@ -201,6 +207,16 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx,
         errors = normalized_errors
     else:
         raise Exception("Unknown errors_by argument")
+
+    # Convert 'y' to (x,y,yaw,pitch) as this is the current visualization
+    # Another possibility would be to convert everything to quaternions and calculate the joint-rotation-angle error
+    if y.shape[1] == 4:  # 'angle'
+        pass
+    elif y.shape[1] == 6:  # 'quaternion'
+        y = utils.convert_quaternion_y_to_yaw_pitch(y)
+        y_pred = utils.convert_quaternion_y_to_yaw_pitch(y_pred)
+    else:
+        raise Exception("Only 'angle' and 'quaternion' are currently supported")
 
     sort_idx = np.argsort(errors) if asc else np.argsort(errors)[::-1]
 
@@ -212,7 +228,7 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx,
 
     img_org = render_view(y_single)
     img_pred = render_view(y_pred_single)
-    img_map = get_map_view(data_dir, y_single[:2], y_pred_single[:2])
+    img_map = get_map_view(data_dir, y_single[:2], y_pred_single[:2], roi)
 
     upper_part_height = int(0.33333 * img_org.shape[0])
     cv_red_color = (0, 0, 255)
@@ -229,13 +245,17 @@ def view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by, idx,
     img_train = cv2.cvtColor(x_input, cv2.COLOR_GRAY2RGB)
     img_map = cv2.cvtColor(img_map, cv2.COLOR_BGR2RGB)
 
+    np.set_printoptions(formatter={'float_kind': lambda x: "%.2f" % x})
+
     multiple_plots(figure_num, 2, 2, 1)
     plt.imshow(img_org, interpolation='bilinear')
-    plt.title('Original' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_single))
+    plt.title('Original %s' % y_single)
 
     multiple_plots(figure_num, 2, 2, 2)
     plt.imshow(img_pred, interpolation='bilinear')
-    plt.title('Estimation' + " (%.2f,%.2f,%.2f,%.2f)" % tuple(y_pred_single))
+    plt.title('Estimation %s' % y_pred_single)
+
+    np.set_printoptions()  # Reset
 
     multiple_plots(figure_num, 2, 2, 3)
     plt.imshow(img_train)
