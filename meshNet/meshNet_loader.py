@@ -293,6 +293,8 @@ class DataLoader:
 
         if self.y_type == 'angle':
             y_new[:, 2:] = (y[:, 2:] * 360) % 360
+        else:
+            y_new[:, 2:] = y[:, 2:]
         return y_new.squeeze()
 
 
