@@ -43,6 +43,11 @@ def euc_loss3q(y_true, y_pred):
     return (500 * lq)
 
 
+# FIXME: Seems I am returning 2 columns from this loss function. What does it do???
+# FIXME: I.e. NOT scalar for each sample as in any other example I could find.
+# FIXME: E.g. see above losses or Keras example-
+# FIXME: def mean_squared_error(y_true, y_pred):
+# FIXME:     return K.mean(K.square(y_pred - y_true), axis=-1)
 def cyclic_loss_1(y_true, y_pred):
     lcyc = K.minimum(K.square(y_pred - y_true),
                      K.minimum(K.square(y_pred - y_true + 1),
@@ -423,17 +428,17 @@ def posenet_train(image_shape, xy_nb_outs, rot_nb_outs, optimizer=None, loss=Non
     # Train model - GoogLeNet (Trained on Places)
     model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, rot_nb_outs=rot_nb_outs)
 
-    if rot_nb_outs == 2:   # 'angle':
+    if rot_nb_outs == 2:   # 'angle'
         rot_loss_1 = cyclic_loss_1
         rot_loss_2 = cyclic_loss_2
         rot_loss_3 = cyclic_loss_3
 
-    elif rot_nb_outs == 4:  # 'quaternion':
+    elif rot_nb_outs == 4:  # 'quaternion'
         rot_loss_1 = euc_loss1q
         rot_loss_2 = euc_loss2q
         rot_loss_3 = euc_loss3q
 
-    elif rot_nb_outs == 9:  # 'matrix':
+    elif rot_nb_outs == 9:  # 'matrix'
         rot_loss_1 = rot_mat_loss1
         rot_loss_2 = rot_mat_loss1
         rot_loss_3 = rot_mat_loss1
