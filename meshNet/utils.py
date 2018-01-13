@@ -11,10 +11,11 @@ from contextlib import contextmanager
 from datetime import datetime
 
 import numpy as np
+from pyquaternion import Quaternion
 import cv2
+from tqdm import tqdm
 
 import consts
-from tqdm import tqdm
 
 
 def get_timestamp():
@@ -305,3 +306,61 @@ def angle_diff(a, b):
 def angle_l2_err(y, y_pred, normalized=False):
     f = 360.0 if normalized else 1.0
     return np.linalg.norm(angle_diff(y * f, y_pred * f) / f, axis=-1)
+
+
+# Currently not used - Converting rotation matrix to euler angles:
+# https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+# OR-
+# http://nghiaho.com/?page_id=846
+# OR-
+# http://planning.cs.uiuc.edu/node103.html
+def get_yaw_pitch_roll_from_quat(quaternion):
+    """ This according to:
+    1) My notation of yaw-pitch-roll (Yaw- Left/Right, Pitch- Up/Down, Roll- Camera rotate).
+    2) Camera pitch is normalized to look horizontally instead of down in the model. I.e its 90 degrees rotated.
+       See: main.cpp @ getXfFromPose() -
+            ...
+            // Base rotation so we will be looking horizontall
+            xyzXf = getCamRotMatDeg(0.0, -90, 0.0) * xyzXf;
+            ..."""
+
+    if type(quaternion) is np.ndarray:
+        quaternion = Quaternion(quaternion)
+
+    yay_pitch_roll = np.rad2deg(quaternion.yaw_pitch_roll)
+    return np.array([yay_pitch_roll[0], yay_pitch_roll[2] + 90, yay_pitch_roll[1]])
+
+
+def get_yaw_pitch_from_quaternion_array(arr):
+    if arr.ndim == 1:
+        arr = np.expand_dims(arr, axis=0)
+    return np.array([get_yaw_pitch_roll_from_quat(quat)[:2] for quat in arr])
+
+
+def convert_quaternion_y_to_yaw_pitch(arr):
+    if arr.shape[1] != 6:
+        raise Exception("Input array must have 6 columns")
+
+    return np.concatenate((arr[:, :2], get_yaw_pitch_from_quaternion_array(arr[:, 2:])), axis=-1)
+
+
+def quaternions_error(y, y_pred, normalized=False):
+    if normalized:
+        raise Exception("Normalized quaternions error not supported")
+
+    y = get_yaw_pitch_from_quaternion_array(y)
+    y_pred = get_yaw_pitch_from_quaternion_array(y_pred)
+
+    return angle_l2_err(y, y_pred, normalized=normalized)
+
+
+def rotation_error(y, y_pred, normalized=False):
+
+    if y.shape[1] == 2:   # 'angle'
+        return angle_l2_err(y, y_pred, normalized=normalized)
+    elif y.shape[1] == 4:  # 'quaternion'
+        return quaternions_error(y, y_pred, normalized=normalized)
+    elif y.shape[1] == 9:   # 'matrix'
+        pass
+    else:
+        raise Exception("Unknown y shape:", y.shape)
