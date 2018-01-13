@@ -23,52 +23,86 @@ import consts
 # Not used in code, for easier interactive debugging
 # import matplotlib.pyplot as plt
 
-sessions_outputs = '/home/moti/cg/project/sessions_outputs'
-# sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
+data_sessions_outputs = '/home/moti/cg/project/sessions_outputs'
+# data_sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
 
-# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
-# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
-# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid800/')
-# data_dir = os.path.join(sessions_outputs, 'berlin_angleOnly_4950_5850/')
-# data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_Full/')
-data_dir = os.path.join(sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
+model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
+# model_sessions_outputs = '/mnt/SSD1/moti/project/meshNet/sessions_outputs'
 
-# data_dir = os.path.join(sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
-# data_dir = os.path.join(sessions_outputs, 'berlin_onlyPos_grid50/')
-# data_dir = os.path.join(sessions_outputs, 'berlin_grid50/')
-# data_dir = os.path.join(sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
-# data_dir = os.path.join(sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid800/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlin_angleOnly_4950_5850/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_Full/')
+data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep_20')
+
+# data_dir = os.path.join(data_sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlin_onlyPos_grid50/')
+# data_dir = os.path.join(data_sessions_outputs, 'berlin_grid50/')
+# data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
+# data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
 train_dir = os.path.join(data_dir, 'train')
 # test_dir = None
 test_dir = os.path.join(data_dir, 'test')
 
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5'
-# weights_filename = '/home/arik/Desktop/moti/project/meshNet/sessions_outputs/meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5'
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5'
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_11_28-13_53_12-100Epochs_Berlin_ROI_Grid200_NoAngles/hdf5/meshNet_weights.e093-loss0.07357-vloss0.5875.hdf5'
+roi = (4400, 5500, 800, 800)
+# roi = (5000, 3000, 800, 800)
 
-# 200 - Single angle
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-12_40_01-100Epochs_Grid200_Batch4/hdf5/meshNet_weights.e098-loss0.07383-vloss0.4329.hdf5'
+# weights_filename = os.path.join(model_sessions_outputs,
+#  'meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5')
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5')
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5')
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_11_28-13_53_12-100Epochs_Berlin_ROI_Grid200_NoAngles/hdf5/meshNet_weights.e093-loss0.07357-vloss0.5875.hdf5')
 
-# 400 - Single angle
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5'
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5'
+# Grid 200 - Single angle
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_06-12_40_01-100Epochs_Grid200_Batch4/hdf5/meshNet_weights.e098-loss0.07383-vloss0.4329.hdf5')
+
+# Grid 400 - Single angle
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5')
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5')
 
 # Angle only - Single XY
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_13-12_40_52-100Epochs_anglesOnly_Batch8/hdf5/meshNet_weights.e090-loss0.00323-vloss0.0023.hdf5'
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_13-12_40_52-100Epochs_anglesOnly_Batch8/hdf5/meshNet_weights.e090-loss0.00323-vloss0.0023.hdf5')
 
-# 200 - XY+Angles - Upper 1/3
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5'
+# Grid 200 - XY+Angles - Upper 1/3
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5')
 
-# 200- XY+Angles + Entire image + Edges - angles
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_31-08_53_29-41Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/meshNet_weights.e038-loss0.09036-vloss0.1261.hdf5'
+# Grid 200- XY+Angles + Entire image + Edges - angles
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_31-08_53_29-41Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/' +
+# 'meshNet_weights.e038-loss0.09036-vloss0.1261.hdf5')
+# TODO: Run better EPOCH-
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_31-08_53_29_60Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/' +
+#  'meshNet_weights.e055-loss0.07561-vloss0.1184.hdf5')
 
-# 200- XY+Angles + Entire image + Edges_and_faces - angles
-# weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_27-00_21_50_55Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces/hdf5/meshNet_weights.e026-loss0.08365-vloss0.1302.hdf5'
+# Grid 200- XY+Angles + Entire image + Edges_and_faces - angle
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_27-00_21_50_55Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces/hdf5/meshNet_weights.e026-loss0.08365-vloss0.1302.hdf5')
 
-# 200- XY+Angles + Entire image + Edges_and_faces - quaternions
-weights_filename = '/home/moti/cg/project/meshNet/sessions_outputs/meshNet_2017_12_28-09_50_03_100Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces_quternions/hdf5/meshNet_weights.e039-loss42.69920-vloss97.8118.hdf5'
+# Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions
+# weights_filename = os.path.join(model_sessions_outputs,
+# 'meshNet_2017_12_28-09_50_03_100Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces_quternions/hdf5/meshNet_weights.e039-loss42.69920-vloss97.8118.hdf5')
 
+# TODO: Run AGAIN (Weight already update - change data to correct ROI)-
+# Step 20- XY+Angles + Entire image + Edges_and_faces - angle - ROI 5K_3K_800_800
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_01_08-22_10_56_55Epochs_berlinRoi_5K_3K_800_800_Grid_Step_20_FullImage_Edges_and_faces_angle',
+#                                 'hdf5/meshNet_best_loss_weights.e049-loss0.04243-vloss0.1199.hdf5')
+
+# Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 1/1/3 instead of 150/150/500
+weights_filename = os.path.join(model_sessions_outputs,
+                                'meshNet_2018_01_10-11_28_23_20Epochs_berlinRoi_Grid200_FullImage_Edges_and_faceas_quaternion-low_weight',
+                                'hdf5/meshNet_best_loss_weights.e019-loss0.41692-vloss0.8952.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
 x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
@@ -77,23 +111,24 @@ y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 use_pickle = False
 render_to_screen = False
 evaluate = True
-test_only = False
 load_weights = False
 initial_epoch = 0  # Should have the weights Epoch number + 1
+test_only = False
 if test_only:
     load_weights = True
+    evaluate = False
 
 # Training options
 batch_size = 32
 save_best_only = True
 
-debug_level = 0
+debug_level = 1
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    epochs = 100
+    epochs 60
 elif debug_level == 1:  # Medium Debug
-    part_of_data = 0.1
+    part_of_data = 5000
     epochs = 2
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
@@ -132,9 +167,9 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
         y_pred = loader.y_inverse_transform(y_pred)
 
     print("%s errors..." % dataset_name)
-    xy_error = utils.xy_dist(y[:, 0:2], y_pred[:, 0:2])
+    xy_error = utils.xy_dist(y[:, :2], y_pred[:, :2])
     print("%s xy error. Mean %s, std %s" % (dataset_name, np.mean(xy_error), np.std(xy_error)))
-    angle_error = utils.angle_l2_err(y[:, 2:4], y_pred[:, 2:4], normalized=normalized)
+    angle_error = utils.rotation_error(y[:, 2:], y_pred[:, 2:], normalized=normalized)
     print("%s angle error. Mean %s, std %s" % (dataset_name, np.mean(angle_error), np.std(angle_error)))
 
     return xy_error, angle_error
@@ -158,18 +193,24 @@ def detailed_evaluation(model, loader, posenet_output=3):
     # PoseNet Fix
     print("Using PoseNet output [%d]" % posenet_output)
     xyz_output = (posenet_output - 1) * 2
-    angle_output = xyz_output + 1
-    y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[angle_output]), axis=-1)
-    y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[angle_output]), axis=-1)
+    rotation_output = xyz_output + 1
+    y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[rotation_output]), axis=-1)
+    y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[rotation_output]), axis=-1)
 
     xy_error_train, angle_error_train = calc_stats(loader, loader.y_train, y_train_pred, normalized=False,
                                                    dataset_name='Train')
     xy_error_test, angle_error_test = calc_stats(loader, loader.y_test, y_test_pred, normalized=False,
                                                  dataset_name='Test')
 
-    # for i in [0, 1, 2, 3, 100, 1000, 3000, 5400, len(y_train_pred)-1]:
-    #    visualize.view_prediction(data_dir, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
-    #                              normalized=False, asc=False, figure_num=i)
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='angle', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='comb', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
 
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
     hist_fname = sess_info.title + '_predictions_err_hist.png'
@@ -208,7 +249,7 @@ def detailed_evaluation(model, loader, posenet_output=3):
 
 # Script config
 title = "meshNet"
-sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else None)
+sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else '_Train')
 
 
 # TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
