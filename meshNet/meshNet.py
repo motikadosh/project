@@ -101,8 +101,8 @@ roi = (4400, 5500, 800, 800)
 
 # Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 1/1/3 instead of 150/150/500
 weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_01_10-11_28_23_20Epochs_berlinRoi_Grid200_FullImage_Edges_and_faceas_quaternion-low_weight',
-                                'hdf5/meshNet_best_loss_weights.e019-loss0.41692-vloss0.8952.hdf5')
+                                'meshNet_2018_01_10-11_28_23_60Epochs_berlinRoi_Grid_Step_20_FullImage_Edges_and_faceas_quaternion-low_weight',
+                                'hdf5/meshNet_best_loss_weights.e054-loss0.23080-vloss0.6674.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
 x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
@@ -122,11 +122,11 @@ if test_only:
 batch_size = 32
 save_best_only = True
 
-debug_level = 1
+debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    epochs 60
+    epochs = 60
 elif debug_level == 1:  # Medium Debug
     part_of_data = 5000
     epochs = 2
