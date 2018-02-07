@@ -34,8 +34,10 @@ model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid800/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_angleOnly_4950_5850/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_Full/')
-data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep_20')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_40')
+data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_10_train')
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_onlyPos_grid50/')
@@ -43,8 +45,8 @@ data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid2
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
 train_dir = os.path.join(data_dir, 'train')
-# test_dir = None
-test_dir = os.path.join(data_dir, 'test')
+test_dir = None
+# test_dir = os.path.join(data_dir, 'test')
 
 roi = (4400, 5500, 800, 800)
 # roi = (5000, 3000, 800, 800)
@@ -100,9 +102,20 @@ roi = (4400, 5500, 800, 800)
 #                                 'hdf5/meshNet_best_loss_weights.e049-loss0.04243-vloss0.1199.hdf5')
 
 # Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 1/1/3 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_01_10-11_28_23_60Epochs_berlinRoi_Grid_Step_20_FullImage_Edges_and_faceas_quaternion-low_weight',
+#                                 'hdf5/meshNet_best_loss_weights.e054-loss0.23080-vloss0.6674.hdf5')
+
+# Grid Step 40- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_01_17-17_58_46_16Epochs_berlinRoi_Grid_Step_40_FullImage_Edges_and_faces_quaternion-low_weight',
+#                                 'hdf5/meshNet_best_loss_weights.e013-loss0.37574-vloss1.0122.hdf5')
+
+# Grid Step 10- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
 weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_01_10-11_28_23_60Epochs_berlinRoi_Grid_Step_20_FullImage_Edges_and_faceas_quaternion-low_weight',
-                                'hdf5/meshNet_best_loss_weights.e054-loss0.23080-vloss0.6674.hdf5')
+                                'meshNet_2018_01_15-18_24_58_20Epochs_berlinRoi_Grid_Step_10_FullImage_Edges_and_faces_quaternion-low_weight',
+                                'hdf5/meshNet_best_loss_weights.e019-loss0.23601-vloss0.1565.hdf5')
+
 
 # TODO: Can this be inferred in case we are just testing?
 x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
@@ -128,7 +141,7 @@ if debug_level == 0:    # No Debug
     part_of_data = 1.0
     epochs = 60
 elif debug_level == 1:  # Medium Debug
-    part_of_data = 5000
+    part_of_data = 6500
     epochs = 2
 elif debug_level == 2:  # Full Debug
     part_of_data = 100

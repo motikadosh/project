@@ -338,10 +338,13 @@ def get_yaw_pitch_from_quaternion_array(arr):
 
 
 def convert_quaternion_y_to_yaw_pitch(arr):
+    if arr.ndim == 1:
+        arr = np.expand_dims(arr, axis=0)
+
     if arr.shape[1] != 6:
         raise Exception("Input array must have 6 columns")
 
-    return np.concatenate((arr[:, :2], get_yaw_pitch_from_quaternion_array(arr[:, 2:])), axis=-1)
+    return np.concatenate((arr[:, :2], get_yaw_pitch_from_quaternion_array(arr[:, 2:])), axis=-1).squeeze()
 
 
 def quaternions_error(y, y_pred, normalized=False):

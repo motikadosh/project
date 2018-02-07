@@ -24,7 +24,8 @@ def euc_loss1x(y_true, y_pred):
 
 def euc_loss1q(y_true, y_pred):
     lq = K.sqrt(K.sum(K.square(y_true[:,:] - y_pred[:,:]), axis=1, keepdims=True))
-    return (150 * lq)
+    # return (150 * lq)
+    return (0.5 * lq)
 
 def euc_loss2x(y_true, y_pred):
     lx = K.sqrt(K.sum(K.square(y_true[:,:] - y_pred[:,:]), axis=1, keepdims=True))
@@ -32,7 +33,8 @@ def euc_loss2x(y_true, y_pred):
 
 def euc_loss2q(y_true, y_pred):
     lq = K.sqrt(K.sum(K.square(y_true[:,:] - y_pred[:,:]), axis=1, keepdims=True))
-    return (150 * lq)
+    # return (150 * lq)
+    return (0.5 * lq)
 
 def euc_loss3x(y_true, y_pred):
     lx = K.sqrt(K.sum(K.square(y_true[:,:] - y_pred[:,:]), axis=1, keepdims=True))
@@ -40,7 +42,8 @@ def euc_loss3x(y_true, y_pred):
 
 def euc_loss3q(y_true, y_pred):
     lq = K.sqrt(K.sum(K.square(y_true[:,:] - y_pred[:,:]), axis=1, keepdims=True))
-    return (500 * lq)
+    # return (500 * lq)
+    return (1.5 * lq)
 
 
 # FIXME: Seems I am returning 2 columns from this loss function. What does it do???
