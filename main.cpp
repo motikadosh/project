@@ -2020,7 +2020,7 @@ void populateModelEdges(float maxDihedralAngle = 135)
 trimesh::xform getXfFromPose(const SamplePose &ps)
 {
     if (ps.roll)
-        throw std::invalid_argument("Z and Roll are not supported");
+        throw std::invalid_argument("Roll is not supported");
 
     // Determine the x,y position
     trimesh::xform xyzXf = trimesh::xform::trans(-ps.x, ps.y, -ps.z) *
@@ -2953,28 +2953,70 @@ void anglesGraphAddPoint(cv::Mat &anglesGraph, float yaw, float pitch, const cv:
         cv::imshow("gAnglesExport", gAnglesExport);
 }
 
+cv::Rect resizeRect(const cv::Rect &rect, float resizeFactor)
+{
+    return cv::Rect(rect.x*resizeFactor, rect.y*resizeFactor, rect.width*resizeFactor, rect.height*resizeFactor);
+}
+
+cv::Point resizePoint(const cv::Point &p, float resizeFactor)
+{
+    return cv::Point(p.x*resizeFactor, p.y*resizeFactor);
+}
+
+void drawArrow(cv::Mat &frame, const cv::Point &start, float yawDeg, int length, const cv::Scalar &color,
+    int thickness = 1)
+{
+    cv::Point end;
+
+    yawDeg += 270; // This is because yaw=0 is UP and not RIGHT
+
+    end.x = (int) (start.x + length * cos(DEG_TO_RAD(yawDeg)));
+    end.y = (int) (start.y + length * sin(DEG_TO_RAD(yawDeg)));
+
+    cv::arrowedLine(frame, start, end, color, thickness);
+}
+
+void getYawPitchRollFromXf(const trimesh::xform &someXf, float &yawDeg, float &pitchDeg, float &rollDeg)
+{
+    trimesh::xform xfInv = inv(someXf);
+    trimesh::xform rotOnlyXf =  trimesh::rot_only(xfInv);
+
+    yawDeg = -1 * RAD_TO_DEG(std::atan2(rotOnlyXf[1], rotOnlyXf[0]));
+    pitchDeg = -1 * (RAD_TO_DEG(std::atan2(rotOnlyXf[6], rotOnlyXf[10])) - 90);
+    rollDeg =
+        RAD_TO_DEG(std::atan2(-1 * rotOnlyXf[2], std::sqrt(rotOnlyXf[6]*rotOnlyXf[6] + rotOnlyXf[10]*rotOnlyXf[10])));
+
+    //DBG("(yaw, pitch, roll) [" << yawDeg << ", " << pitchDeg << ", " << rollDeg << "]");
+}
+
 void updateUpperMapShow()
 {
-    cv::Mat upperMapShow = gSamplesMap.clone();
+    cv::Mat mapRoi = gSamplesMap(gSamplesROI);
+
+    float resizeFactor = FLAGS_win_width / float(gSamplesROI.width);
+    cv::Mat upperMapShow;
+    cv::resize(mapRoi, upperMapShow, cv::Size(FLAGS_win_width, mapRoi.rows * resizeFactor));
 
     // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
     trimesh::xform xfInv = inv(xf);
-    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
     //DBG("xf\n" << xf);
     //DBG("xfInv\n" << xfInv);
+    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
 
-    cv::circle(upperMapShow,
-        gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size()),
-        (gSamplesROI.width / FLAGS_win_width) * 8, azul, CV_FILLED);
+    cv::Point pMap = gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size());
+    pMap = resizePoint(pMap, resizeFactor) - resizePoint(gSamplesROI.tl(), resizeFactor);
 
-    cv::resize(upperMapShow(gSamplesROI), upperMapShow,
-        cv::Size(FLAGS_win_width, int(gSamplesROI.height * gSamplesROI.width / FLAGS_win_width)));
+    cv::circle(upperMapShow, pMap, 8, azul, CV_FILLED);
+
+    float yawDeg, pitchDeg, rollDeg;
+    getYawPitchRollFromXf(xf, yawDeg, pitchDeg, rollDeg);
+    drawArrow(upperMapShow, pMap, yawDeg, 40, red, 4);
+
+    cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
 
     //std::stringstream ss;
     //ss << "curXFxyz " << curXFxyz << ",\nxfInv:\n" << xfInv << "\nCenter " << themesh->bsphere.center;
     //myPutText(upperMapShow, ss, cv::Point(5, 10));
-
-    cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
 }
 
 void autoNavigate()
@@ -3003,7 +3045,7 @@ void autoNavigate()
 
     if (sIsFirstRun)
     {
-        if (FLAGS_export_third && gAutoNavigationIdx <= (FLAGS_export_third - 1) * samplesData.size() / 3)
+        if (FLAGS_export_third && (unsigned)gAutoNavigationIdx <= (FLAGS_export_third - 1) * samplesData.size() / 3)
             gAutoNavigationIdx = (FLAGS_export_third - 1) * samplesData.size() / 3;
 
         makeDir(FLAGS_output_dir + FS_DELIMITER_LINUX + (sIsTrain ? "train" : "test"));
@@ -3061,7 +3103,7 @@ void autoNavigate()
         angleColor, true);
 
     // If is last or next sample has different XY - Save angles exports graph to disk
-    if (gAutoNavigationIdx == samplesData.size() - 1 ||
+    if ((unsigned)gAutoNavigationIdx == samplesData.size() - 1 ||
         samplesData[gAutoNavigationIdx].x != samplesData[gAutoNavigationIdx + 1].x ||
         samplesData[gAutoNavigationIdx].y != samplesData[gAutoNavigationIdx + 1].y)
     {
@@ -3192,33 +3234,52 @@ void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdat
 {
     if (event == cv::EVENT_LBUTTONDOWN)
     {
-        // Changing view to closest sample to mouse press
         cv::Point userMapP = cv::Point(x, y) + gSamplesROI.tl();
-        DBG("userMapP: " << userMapP << ", x,y: " << cv::Point(x, y) << "gSamplesROI tl: " << gSamplesROI.tl());
+        DBG("userMapP " << userMapP << ", x,y " << cv::Point(x, y) << ", gSamplesROI tl " << gSamplesROI.tl());
 
-        unsigned minDistIdx = 0;
-        double minDist = std::numeric_limits<double>::max();
-        for (unsigned i = 0; i < gDataSet["train"].samplesData.size(); i++)
+        if (gDataSet["train"].samplesData.size())
         {
-            SamplePose &pose = gDataSet["train"].samplesData[i];
-            cv::Point3f sampleP(pose.x, pose.y, pose.z);
-
-            cv::Point sampleMapPoint = gOrthoProjData.convertWorldPointToMap(sampleP, gModelMap.size());
-
-            double dist = cv::norm(userMapP - sampleMapPoint);
-            if (dist < minDist)
+            // Changing view to closest sample to mouse press
+            unsigned minDistIdx = 0;
+            double minDist = std::numeric_limits<double>::max();
+            for (unsigned i = 0; i < gDataSet["train"].samplesData.size(); i++)
             {
-                minDistIdx = i;
-                minDist = dist;
+                SamplePose &pose = gDataSet["train"].samplesData[i];
+                cv::Point3f sampleP(pose.x, pose.y, pose.z);
+
+                cv::Point sampleMapPoint = gOrthoProjData.convertWorldPointToMap(sampleP, gModelMap.size());
+
+                double dist = cv::norm(userMapP - sampleMapPoint);
+                if (dist < minDist)
+                {
+                    minDistIdx = i;
+                    minDist = dist;
+                }
             }
+
+            gAutoNavigationIdx = minDistIdx;
+
+            xf = gDataSet["train"].xfSamples[gAutoNavigationIdx];
+
+            DBG("Jumping to train sample [#" << gAutoNavigationIdx << "], pose [" <<
+                gDataSet["train"].samplesData[gAutoNavigationIdx] << "], xf\n" << xf);
         }
+        else
+        {
+            cv::Point3f userWorldP = gOrthoProjData.convertMapPointToWorld(userMapP, gModelMap.size());
+            if (!getPointZ(userWorldP, userWorldP))
+            {
+                DBG("User point does not have valid Z value. ignoring");
+                return;
+            }
 
-        gAutoNavigationIdx = minDistIdx;
+            float yawDeg, pitchDeg, rollDeg;
+            getYawPitchRollFromXf(xf, yawDeg, pitchDeg, rollDeg);
 
-        xf = gDataSet["train"].xfSamples[gAutoNavigationIdx];
-
-        DBG("Jumping to train sample [#" << gAutoNavigationIdx << "], pose [" <<
-            gDataSet["train"].samplesData[gAutoNavigationIdx] << "], xf\n" << xf);
+            SamplePose pose(userWorldP.x, userWorldP.y, userWorldP.z, yawDeg, pitchDeg, 0);
+            xf = getXfFromPose(pose);
+            DBG("Jumping to pose [" << pose << "], xf\n" << xf);
+        }
     }
     else if (event == cv::EVENT_RBUTTONDOWN)
     {
