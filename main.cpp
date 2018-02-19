@@ -317,7 +317,6 @@ cv::Point parsePointStr(const std::string &pointStr)
     return point;
 }
 
-
 struct SamplePose {
     SamplePose(float x, float y, float z, float yaw, float pitch, float roll) :
         x(x), y(y), z(z), yaw(yaw), pitch(pitch), roll(roll) { }
@@ -457,7 +456,6 @@ struct OrthoProjection {
 
         return cv::Point3f(worldX, worldY, 0);
     }
-
 
 private:
     const std::string SEP = "=";
@@ -1513,7 +1511,7 @@ std::string getTimeStamp()
 // Save the current screen to PNG/PPM file
 std::string takeScreenshot(const std::string &fileName = std::string())
 {
-    DBG_T("Entered");
+    DBG("Entered");
 
     cv::setOpenGlContext(MAIN_WINDOW_NAME); // Sets the specified window as current OpenGL context
 
@@ -1544,7 +1542,7 @@ std::string takeScreenshot(const std::string &fileName = std::string())
     {
         filePath = FLAGS_output_dir + fileName + "." IMAGE_FORMAT_EXT;
     }
-    DBG_T("Saving image " << filePath);
+    DBG("Saving image " << filePath);
 
     // Read pixels
     GLint V[4];
@@ -1596,7 +1594,7 @@ std::string takeScreenshot(const std::string &fileName = std::string())
         //cv::waitKey(0);
     }
 
-    DBG_T("Done. filePath: " << filePath);
+    DBG("Done. filePath: " << filePath);
     return filePath;
 }
 
@@ -2119,24 +2117,217 @@ void loadModelMap(const std::string &modelFile)
     DBG("Model Ortho Projection data " << gOrthoProjData);
 }
 
+void getYawPitchRollFromXf(const trimesh::xform &someXf, float &yawDeg, float &pitchDeg, float &rollDeg)
+{
+    trimesh::xform xfInv = inv(someXf);
+    trimesh::xform rotOnlyXf =  trimesh::rot_only(xfInv);
+
+    yawDeg = -1 * RAD_TO_DEG(std::atan2(rotOnlyXf[1], rotOnlyXf[0]));
+    pitchDeg = -1 * (RAD_TO_DEG(std::atan2(rotOnlyXf[6], rotOnlyXf[10])) - 90);
+    rollDeg =
+        RAD_TO_DEG(std::atan2(-1 * rotOnlyXf[2], std::sqrt(rotOnlyXf[6]*rotOnlyXf[6] + rotOnlyXf[10]*rotOnlyXf[10])));
+
+    //DBG("(yaw, pitch, roll) [" << yawDeg << ", " << pitchDeg << ", " << rollDeg << "]");
+}
+
+SamplePose getSamplePoseFromXF(const trimesh::xform &someXf)
+{
+    // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
+    trimesh::xform xfInv = inv(someXf);
+    cv::Point3f p3d(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
+
+    float yawDeg, pitchDeg, rollDeg;
+    getYawPitchRollFromXf(someXf, yawDeg, pitchDeg, rollDeg);
+
+    SamplePose pose(p3d.x, p3d.y, p3d.z, yawDeg, pitchDeg, 0);
+    //DBG("pose [" << pose << "]");
+    return pose;
+}
+
+cv::Mat getCvMatFromScreen(const std::string &winName)
+{
+    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
+
+    // Read pixels
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLint width = V[2], height = V[3];
+    std::unique_ptr<char> buf = std::unique_ptr<char>(new char[width * height * 3]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    GLenum format = GL_BGR;
+    glReadPixels(V[0], V[1], width, height, format, GL_UNSIGNED_BYTE, buf.get());
+
+    // Flip top-to-bottom
+    for (int i = 0; i < height / 2; i++)
+    {
+        char *row1 = buf.get() + 3 * width * i;
+        char *row2 = buf.get() + 3 * width * (height - 1 - i);
+        for (int j = 0; j < 3 * width; j++)
+            std::swap(row1[j], row2[j]);
+    }
+
+    cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
+
+    return img.clone();
+}
+
+cv::Mat convertImgToBinary(const cv::Mat &img)
+{
+    cv::Mat binaryImg;
+    cvtColor(img, binaryImg, CV_BGR2GRAY);
+    cv::bitwise_not(binaryImg, binaryImg);
+    binaryImg = binaryImg > 0;
+    return binaryImg;
+}
+
+// Returns false if image does not have enough data/edges or imwrite fails
+bool checkAndSaveCurrentSceen(const std::string &filePath, cv::Mat *edges = NULL, cv::Mat *faces = NULL)
+{
+    DBG_T("Entered");
+
+    // Sanity
+    // Notice this should not be taken too lightly, since we color each edge in its index number.
+    // I.e. 1st one is BLACK. Therefore using BLACK background means the 1st edge will be lost.
+    if (backgroundColorGL != whiteGL)
+        throw std::runtime_error("This function is written for white background");
+
+    cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
+    cv::Mat facesImg = getCvMatFromScreen(FACES_WINDOW_NAME);
+
+    // Sanity
+    cv::Size winSize(FLAGS_win_width, FLAGS_win_height);
+    if (img.size() != winSize || facesImg.size() != winSize)
+    {
+        DBG("img Size != winSize [" << img.size() << ", " << winSize << "] OR facesImg Size != winSize [" <<
+            facesImg.size() << ", " << winSize << "]");
+        throw std::runtime_error("Unexpected image size");
+    }
+
+    if (FLAGS_crop_upper_part)
+    {
+        cv::Rect upperPart(0, 0, img.cols, std::round(img.rows * FLAGS_crop_upper_part));
+        img = img(upperPart);
+        facesImg = facesImg(upperPart);
+    }
+
+    if (edges)
+        *edges = img;
+    if (faces)
+        *faces = facesImg;
+
+    std::vector<int> edgesInView = findEdgesInView(img, FLAGS_min_edge_pixels);
+    if ((int)edgesInView.size() < FLAGS_min_edges_threshold)
+    {
+        DBG_T("Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]");
+        if (FLAGS_debug)
+            imshowAndWait(img, 0, "skip-min_edges_threshold");
+        return false;
+    }
+
+    if (FLAGS_min_data_threshold) // This condition is to save the countNonZero() when min_data_threshold is not used
+    {
+        cv::Mat invImg;
+        cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
+        cv::bitwise_not(invImg, invImg);
+
+        int nonZeroPixelsCount = cv::countNonZero(invImg);
+        float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
+        if (imageContentPrecentage < FLAGS_min_data_threshold)
+        {
+            DBG_T("Skipping [" << filePath << "]. Pixel count [" << nonZeroPixelsCount << "], Data part [" <<
+                imageContentPrecentage << "/" << FLAGS_min_data_threshold  << "]");
+            return false;
+        }
+    }
+
+    if (FLAGS_min_sky_precent)
+    {
+        unsigned countWhite = 0;
+        for (int x = 0; x < facesImg.cols; x++)
+        {
+            if (facesImg.at<cv::Vec3b>(0, x) == cv::Vec3b(255, 255, 255))
+                countWhite++;
+        }
+
+        double skyPrecent = countWhite / double(facesImg.cols);
+        if (skyPrecent < FLAGS_min_sky_precent)
+        {
+            DBG_T("Skipping [" << filePath << "]. Sky precent [" << skyPrecent<< "<" << FLAGS_min_sky_precent << "]");
+            if (FLAGS_debug)
+                imshowAndWait(facesImg, 0, "skip-min_sky_precent");
+            return false;
+        }
+    }
+
+    if (filePath.empty())
+    {
+        DBG("Empty filePath. Skipping save...");
+        return true;
+    }
+
+    if (!cv::imwrite(filePath + "_edges.png", img))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+
+    if (!cv::imwrite(filePath + "_faces.png", facesImg))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+
+#if 0
+    cv::Mat blurImg = convertImgToBinary(img);
+    cv::GaussianBlur(blurImg, blurImg, cv::Size(FLAGS_kernel_size, FLAGS_kernel_size), 0);
+
+    cv::Mat facesImgBinary = convertImgToBinary(facesImg);
+    cv::bitwise_and(blurImg, facesImgBinary, blurImg);
+    if (!cv::imwrite(filePath + "_blur.png", blurImg))
+    {
+        std::cout << "Failed saving file " << filePath << std::cout;
+        return false;
+    }
+#endif
+
+    DBG_T("Done");
+    return true;
+}
+
 void handleMenuKeyboard(int key)
 {
     //DBG("key [" << key << "], char [" << (char)key << "]");
 
     switch (key)
     {
-    case 's':
-        showMap = !showMap;
-        DBG("Toggle show map is now: " << showMap);
-        break;
-
     //case 'c':
     //    std::cout << "Toggle faces-color (black/white)" << std::endl;
     //    facesColorGL = facesColorGL == whiteGL ? blackGL : whiteGL;
     //    break;
 
-    case 'S':
-        takeScreenshot();
+    case 's':
+        {
+            static unsigned sManualExportNum = 0;
+            std::stringstream ssNum;
+            ssNum << std::setfill('0') << std::setw(6) << sManualExportNum;
+            std::string sampleFilePathNoExt = FLAGS_output_dir + "pose_" + ssNum.str();
+
+            bool dbgState = FLAGS_debug;
+            FLAGS_debug = true;
+            if (checkAndSaveCurrentSceen(sampleFilePathNoExt))
+            {
+                // Image is OK and was saved. Write also image data
+                SamplePose pose = getSamplePoseFromXF(xf);
+                pose.write(sampleFilePathNoExt + ".txt");
+                xf.write(sampleFilePathNoExt + ".xf");
+
+                DBG("Export Done. sampleFilePathNoExt [" << sampleFilePathNoExt << "]");
+                sManualExportNum++;
+            }
+            FLAGS_debug = dbgState;
+
+            //takeScreenshot();
+        }
         break;
 
     case 'p':
@@ -2199,7 +2390,7 @@ void handleNavKeyboard(int key)
 
     case 'k':
         gAutoNavigationIdx++;
-        if (gAutoNavigationIdx == gDataSet["train"].xfSamples.size())
+        if (gAutoNavigationIdx == (int)gDataSet["train"].xfSamples.size())
             gAutoNavigationIdx = 0;
         DBG("Up gAutoNavigationIdx [" << gAutoNavigationIdx << "]");
         break;
@@ -2238,11 +2429,15 @@ void handleNavKeyboard(int key)
     case '+':
     case '=':
         xyzStep *= 2;
+        rotStep *= 2;
         DBG("Increased xyzStep to " << xyzStep);
+        DBG("Increased rotStep to " << rotStep);
         break;
     case '-':
         xyzStep /= 2;
+        rotStep /= 2;
         DBG("Decreased xyzStep to " << xyzStep);
+        DBG("Decreased rotStep to " << rotStep);
         break;
         // Camera Position - XY
     case KEY_LEFT:
@@ -2707,173 +2902,6 @@ std::string projectionMatToStr(const trimesh::xform &xf)
     return ss.str();
 }
 
-cv::Mat getCvMatFromScreen(const std::string &winName)
-{
-    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
-
-    // Read pixels
-    GLint V[4];
-    glGetIntegerv(GL_VIEWPORT, V);
-    GLint width = V[2], height = V[3];
-    std::unique_ptr<char> buf = std::unique_ptr<char>(new char[width * height * 3]);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    GLenum format = GL_BGR;
-    glReadPixels(V[0], V[1], width, height, format, GL_UNSIGNED_BYTE, buf.get());
-
-    // Flip top-to-bottom
-    for (int i = 0; i < height / 2; i++)
-    {
-        char *row1 = buf.get() + 3 * width * i;
-        char *row2 = buf.get() + 3 * width * (height - 1 - i);
-        for (int j = 0; j < 3 * width; j++)
-            std::swap(row1[j], row2[j]);
-    }
-
-    cv::Mat img(cv::Size(width, height), CV_8UC3, buf.get(), cv::Mat::AUTO_STEP);
-
-    return img.clone();
-}
-
-cv::Mat convertImgToBinary(const cv::Mat &img)
-{
-    cv::Mat binaryImg;
-    cvtColor(img, binaryImg, CV_BGR2GRAY);
-    cv::bitwise_not(binaryImg, binaryImg);
-    binaryImg = binaryImg > 0;
-    return binaryImg;
-}
-
-// Returns false if image does not have enough data/edges or imwrite fails
-bool checkAndSaveCurrentSceen(const std::string &filePath,
-    cv::Mat *edges = NULL, cv::Mat *faces = NULL, bool dbg = false)
-{
-    DBG_T("Entered");
-
-    // Sanity
-    // Notice this should not be taken too lightly, since we color each edge in its index number.
-    // I.e. 1st one is BLACK. Therefore using BLACK background means the 1st edge will be lost.
-    if (backgroundColorGL != whiteGL)
-        throw std::runtime_error("This function is written for white background");
-
-    cv::Mat img = getCvMatFromScreen(MAIN_WINDOW_NAME);
-    cv::Mat facesImg = getCvMatFromScreen(FACES_WINDOW_NAME);
-
-    // Sanity
-    cv::Size winSize(FLAGS_win_width, FLAGS_win_height);
-    if (img.size() != winSize || facesImg.size() != winSize)
-    {
-        DBG("img Size != winSize [" << img.size() << ", " << winSize << "] OR facesImg Size != winSize [" <<
-            facesImg.size() << ", " << winSize << "]");
-        throw std::runtime_error("Unexpected image size");
-    }
-
-    if (FLAGS_crop_upper_part)
-    {
-        cv::Rect upperPart(0, 0, img.cols, std::round(img.rows * FLAGS_crop_upper_part));
-        img = img(upperPart);
-        facesImg = facesImg(upperPart);
-    }
-
-    if (edges)
-        *edges = img;
-    if (faces)
-        *faces = facesImg;
-
-    std::vector<int> edgesInView = findEdgesInView(img, FLAGS_min_edge_pixels);
-    if ((int)edgesInView.size() < FLAGS_min_edges_threshold)
-    {
-        std::stringstream ss;
-        ss << "Skipping [" << filePath << "]. Edges [" << edgesInView.size() << "/" << FLAGS_min_edges_threshold<< "]";
-        if (dbg)
-        {
-            DBG(ss.str());
-            imshowAndWait(img, 0, "skip-min_edges_threshold");
-        }
-        else
-        {
-            DBG_T(ss.str());
-        }
-        return false;
-    }
-
-    if (FLAGS_min_data_threshold) // This condition is to save the countNonZero() when min_data_threshold is not used
-    {
-        cv::Mat invImg;
-        cvtColor(img, invImg, CV_BGR2GRAY); // Perform gray scale conversion
-        cv::bitwise_not(invImg, invImg);
-
-        int nonZeroPixelsCount = cv::countNonZero(invImg);
-        float imageContentPrecentage = nonZeroPixelsCount / float(img.cols * img.rows);
-        if (imageContentPrecentage < FLAGS_min_data_threshold)
-        {
-            DBG_T("Skipping [" << filePath << "]. Pixel count [" << nonZeroPixelsCount << "], Data part [" <<
-                imageContentPrecentage << "/" << FLAGS_min_data_threshold  << "]");
-            return false;
-        }
-    }
-
-    if (FLAGS_min_sky_precent)
-    {
-        unsigned countWhite = 0;
-        for (int x = 0; x < facesImg.cols; x++)
-        {
-            if (facesImg.at<cv::Vec3b>(0, x) == cv::Vec3b(255, 255, 255))
-                countWhite++;
-        }
-
-        double skyPrecent = countWhite / double(facesImg.cols);
-        if (skyPrecent < FLAGS_min_sky_precent)
-        {
-            std::stringstream ss;
-            ss << "Skipping [" << filePath << "]. Sky precent [" << skyPrecent<< "<" << FLAGS_min_sky_precent << "]";
-            if (dbg)
-            {
-                DBG(ss.str());
-                imshowAndWait(facesImg, 0, "skip-min_sky_precent");
-            }
-            else
-            {
-                DBG_T(ss.str());
-            }
-            return false;
-        }
-    }
-
-    if (filePath.empty())
-    {
-        DBG("Empty filePath. Skipping save...");
-        return true;
-    }
-
-    if (!cv::imwrite(filePath + "_edges.png", img))
-    {
-        std::cout << "Failed saving file " << filePath << std::cout;
-        return false;
-    }
-
-    if (!cv::imwrite(filePath + "_faces.png", facesImg))
-    {
-        std::cout << "Failed saving file " << filePath << std::cout;
-        return false;
-    }
-
-#if 0
-    cv::Mat blurImg = convertImgToBinary(img);
-    cv::GaussianBlur(blurImg, blurImg, cv::Size(FLAGS_kernel_size, FLAGS_kernel_size), 0);
-
-    cv::Mat facesImgBinary = convertImgToBinary(facesImg);
-    cv::bitwise_and(blurImg, facesImgBinary, blurImg);
-    if (!cv::imwrite(filePath + "_blur.png", blurImg))
-    {
-        std::cout << "Failed saving file " << filePath << std::cout;
-        return false;
-    }
-#endif
-
-    DBG_T("Done");
-    return true;
-}
-
 #define CHECK_POINT_FNAME "check_point.txt"
 void saveCheckPoint(const std::string &outDir, const std::string &modelFileName, bool isTrain,
     unsigned autoNavigationIdx, int exportsNum, int skipsNum)
@@ -2976,19 +3004,6 @@ void drawArrow(cv::Mat &frame, const cv::Point &start, float yawDeg, int length,
     cv::arrowedLine(frame, start, end, color, thickness);
 }
 
-void getYawPitchRollFromXf(const trimesh::xform &someXf, float &yawDeg, float &pitchDeg, float &rollDeg)
-{
-    trimesh::xform xfInv = inv(someXf);
-    trimesh::xform rotOnlyXf =  trimesh::rot_only(xfInv);
-
-    yawDeg = -1 * RAD_TO_DEG(std::atan2(rotOnlyXf[1], rotOnlyXf[0]));
-    pitchDeg = -1 * (RAD_TO_DEG(std::atan2(rotOnlyXf[6], rotOnlyXf[10])) - 90);
-    rollDeg =
-        RAD_TO_DEG(std::atan2(-1 * rotOnlyXf[2], std::sqrt(rotOnlyXf[6]*rotOnlyXf[6] + rotOnlyXf[10]*rotOnlyXf[10])));
-
-    //DBG("(yaw, pitch, roll) [" << yawDeg << ", " << pitchDeg << ", " << rollDeg << "]");
-}
-
 void updateUpperMapShow()
 {
     cv::Mat mapRoi = gSamplesMap(gSamplesROI);
@@ -2997,20 +3012,15 @@ void updateUpperMapShow()
     cv::Mat upperMapShow;
     cv::resize(mapRoi, upperMapShow, cv::Size(FLAGS_win_width, mapRoi.rows * resizeFactor));
 
-    // https://www.opengl.org/discussion_boards/showthread.php/178484-Extracting-camera-position-from-a-ModelView-Matrix
-    trimesh::xform xfInv = inv(xf);
-    //DBG("xf\n" << xf);
-    //DBG("xfInv\n" << xfInv);
-    cv::Point3f curXFxyz(xfInv[12] - themesh->bsphere.center[0], themesh->bsphere.center[1] - xfInv[13], xfInv[14]);
+    SamplePose curPose = getSamplePoseFromXF(xf);
 
-    cv::Point pMap = gOrthoProjData.convertWorldPointToMap(curXFxyz, gModelMap.size());
+    cv::Point pMap =
+        gOrthoProjData.convertWorldPointToMap(cv::Point3f(curPose.x, curPose.y, curPose.z), gModelMap.size());
     pMap = resizePoint(pMap, resizeFactor) - resizePoint(gSamplesROI.tl(), resizeFactor);
 
     cv::circle(upperMapShow, pMap, 8, azul, CV_FILLED);
 
-    float yawDeg, pitchDeg, rollDeg;
-    getYawPitchRollFromXf(xf, yawDeg, pitchDeg, rollDeg);
-    drawArrow(upperMapShow, pMap, yawDeg, 40, red, 4);
+    drawArrow(upperMapShow, pMap, curPose.yaw, 40, red, 4);
 
     cv::imshow(UPPER_MAP_WINDOW_NAME, upperMapShow);
 
@@ -3285,11 +3295,14 @@ void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdat
     {
         // Viewing current view edges & faces as will be exported
         cv::Mat edges, faces;
-        if (checkAndSaveCurrentSceen("", &edges, &faces, true))
+        bool dbgState = FLAGS_debug;
+        FLAGS_debug = true;
+        if (checkAndSaveCurrentSceen("", &edges, &faces))
         {
             imshowAndWait(edges, 33, "edges", false);
             imshowAndWait(faces, 33, "faces", false);
         }
+        FLAGS_debug = dbgState;
     }
 }
 
