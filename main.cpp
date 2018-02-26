@@ -92,6 +92,7 @@ DEFINE_double(min_sky_precent, 0.5, "Minimum of most upper line to be BG - I.e. 
 
 DEFINE_int32(win_width, 800, "Width of the main window");
 DEFINE_int32(win_height, 600, "Height of the main window");
+DEFINE_bool(upper_map_crop, true, "Show only sample_rect in upper map");
 
 DEFINE_bool(debug, false, "Debug mode");
 
@@ -1319,7 +1320,12 @@ void redrawFaces(void *userData)
 
     cls();
 
-    camera = trimesh::GLCamera();
+    static int firstTime = true;
+    if (firstTime)
+    {
+        camera = trimesh::GLCamera();
+        //firstTime = false;
+    }
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
@@ -1345,7 +1351,12 @@ void redrawEdges(void *userData)
 
     //DBG(edges);
     //DBG("\n" << xf);
-    camera = trimesh::GLCamera();
+    static int firstTime = true;
+    if (firstTime)
+    {
+        camera = trimesh::GLCamera();
+        //firstTime = false;
+    }
     camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
@@ -2340,11 +2351,15 @@ void handleMenuKeyboard(int key)
         break;
 
     case ')':
-        fov /= 1.1f; camera.set_fov(fov);
+    case '0':
+        fov /= 1.1f;
+        camera.set_fov(fov);
         std::cout << "New fov value: " << fov << std::endl;
         break;
     case '(':
-        fov *= 1.1f; camera.set_fov(fov);
+    case '9':
+        fov *= 1.1f;
+        camera.set_fov(fov);
         std::cout << "New fov value: " << fov << std::endl;
         break;
 
@@ -2362,6 +2377,8 @@ void setAutoNavState(bool newState)
 
 void handleNavKeyboard(int key)
 {
+    /*
+    // Notice numbers are now used for other keys
     if (key >= '0' && key <= '9')
     {
         std::string xfFile = trimesh::replace_ext(xfFileName, "") + std::string((const char *)&key) + ".xf";
@@ -2377,7 +2394,7 @@ void handleNavKeyboard(int key)
                 DBG("Failed saving view to " << xfFile);
         }
         return;
-    }
+    }*/
 
     switch (key)
     {
@@ -3006,9 +3023,15 @@ void drawArrow(cv::Mat &frame, const cv::Point &start, float yawDeg, int length,
 
 void updateUpperMapShow()
 {
-    cv::Mat mapRoi = gSamplesMap(gSamplesROI);
+    cv::Rect mapShowRect;
+    if (FLAGS_upper_map_crop)
+        mapShowRect = gSamplesROI;
+    else
+        mapShowRect = cv::Rect(cv::Point(0, 0), gSamplesMap.size());
 
-    float resizeFactor = FLAGS_win_width / float(gSamplesROI.width);
+    cv::Mat mapRoi = gSamplesMap(mapShowRect);
+
+    float resizeFactor = FLAGS_win_width / float(mapRoi.cols);
     cv::Mat upperMapShow;
     cv::resize(mapRoi, upperMapShow, cv::Size(FLAGS_win_width, mapRoi.rows * resizeFactor));
 
@@ -3016,7 +3039,7 @@ void updateUpperMapShow()
 
     cv::Point pMap =
         gOrthoProjData.convertWorldPointToMap(cv::Point3f(curPose.x, curPose.y, curPose.z), gModelMap.size());
-    pMap = resizePoint(pMap, resizeFactor) - resizePoint(gSamplesROI.tl(), resizeFactor);
+    pMap = resizePoint(pMap, resizeFactor) - resizePoint(mapShowRect.tl(), resizeFactor);
 
     cv::circle(upperMapShow, pMap, 8, azul, CV_FILLED);
 
@@ -3244,8 +3267,17 @@ void mouseUpperMapCallbackFunc(int event, int x, int y, int flags, void *userdat
 {
     if (event == cv::EVENT_LBUTTONDOWN)
     {
-        cv::Point userMapP = cv::Point(x, y) + gSamplesROI.tl();
-        DBG("userMapP " << userMapP << ", x,y " << cv::Point(x, y) << ", gSamplesROI tl " << gSamplesROI.tl());
+        cv::Rect mapShowRect;
+        if (FLAGS_upper_map_crop)
+            mapShowRect = gSamplesROI;
+        else
+            mapShowRect = cv::Rect(cv::Point(0, 0), gSamplesMap.size());
+
+        float resizeFactor = FLAGS_win_width / float(mapShowRect.width);
+
+        cv::Point userMapP = resizePoint(cv::Point(x, y), 1 / resizeFactor) +
+            resizePoint(mapShowRect.tl(), 1 / resizeFactor);
+        DBG("userMapP " << userMapP << ", x,y " << cv::Point(x, y) << ", gSamplesROI tl " << mapShowRect.tl());
 
         if (gDataSet["train"].samplesData.size())
         {
