@@ -73,6 +73,7 @@ def get_image_size(img):
     """Size is (width, height), Shape (Assume Tensorflow/OpenCV style) is (row, cols, channels)"""
     return img.shape[1], img.shape[0]
 
+
 def load_pickle(pickle_full_path):
     with open(pickle_full_path) as f:
         print("Loading history from pickle [" + pickle_full_path + "]")
@@ -193,7 +194,10 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
             file_urls = np.empty(img_num, dtype="object")
 
             if image_size is not None:
-                x = np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.float32)
+                if process_image_fn is None:
+                    x = np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.float32)
+                else:
+                    x = process_image_fn.allocate_images(img_num, image_size)
 
             cnt = 0
             label = None
@@ -221,7 +225,7 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
                         if img is None:
                             continue
 
-                    x[cnt, :, :, 0] = img
+                    x[cnt, :, :, :] = img
 
                 if labels_parser is not None:
                     label = labels_parser.read_label(cur_file)

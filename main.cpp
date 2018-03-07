@@ -80,8 +80,9 @@ DEFINE_double(grid_step, 20.0, "Step size between each two (x, y) pts in 3D mode
 DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
 DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
 DEFINE_bool(sample_pos_only, false, "No angle (yaw/pitch) sampling is made - for debugging");
-DEFINE_string(sample_rect, "", "Rect in map dimentions to perform sampling. Format: \"x y width height\"");
-DEFINE_string(sample_angle_only, "", "Single x,y in map dimentions to perform all angles sampling");
+DEFINE_string(sample_rect, "", "Rect in map dimensions to perform sampling. Format: \"x y width height\"");
+DEFINE_string(sample_angle_only, "", "Single x,y in map dimensions to perform all angles sampling");
+DEFINE_bool(sample_depth, true, "When true - Saves also depth maps in .exr format");
 
 DEFINE_double(crop_upper_part, 0 /*0.33333*/, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
@@ -90,9 +91,14 @@ DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage
 DEFINE_double(min_sky_precent, 0.5, "Minimum of most upper line to be BG - I.e. Sky");
 //DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
 
-DEFINE_int32(win_width, 800, "Width of the main window");
-DEFINE_int32(win_height, 600, "Height of the main window");
+DEFINE_int32(win_width, 400, "Width of the main window");
+DEFINE_int32(win_height, 300, "Height of the main window");
 DEFINE_bool(upper_map_crop, true, "Show only sample_rect in upper map");
+DEFINE_bool(visualizations, false, "False - Do not update extra visualizations on export");
+
+DEFINE_bool(camera_trimesh, false, "Use Trimesh camera for setting frustum");
+DEFINE_double(z_far, 1500, "Fixed far clip plane - Valid when camera_trimesh is false");
+DEFINE_double(z_near, 0.5, "Fixed near clip plane - Valid when camera_trimesh is false");
 
 DEFINE_bool(debug, false, "Debug mode");
 
@@ -106,6 +112,7 @@ const float PI = 3.14159265358979323846264f;
 
 #define MAIN_WINDOW_NAME "OpenGL"
 #define VERTEX_WINDOW_NAME "vertex_win"
+#define DEPTH_WINDOW_NAME "depth_win"
 #define FACES_WINDOW_NAME "faces_win"
 #define CV_WINDOW_NAME "cv_win"
 #define UPPER_MAP_WINDOW_NAME "upper_map"
@@ -229,7 +236,7 @@ GLfloat const *backgroundColorGL = whiteGL;
 GLfloat const *foregroundColorGL = blackGL;
 const GLfloat *groundColorGL = whiteGL;
 
-trimesh::GLCamera camera;
+trimesh::GLCamera gCamera;
 trimesh::xform xf; // Current location and orientation
 std::string xfFileName;
 int dbgCount = 0;
@@ -252,12 +259,14 @@ cv::Mat cvMainImg;
 cv::Mat cvVertexImg;
 
 cv::Mat cvMap;
-trimesh::GLCamera cameraMap;
+//trimesh::GLCamera cameraMap;
 trimesh::xform xfMap; // Map location and orientation
 
 cv::Mat cvPhoto;
 bool showMap = false;
 cv::Mat cvShowPhoto;
+
+cv::Mat gDepthMap;
 
 std::string markedPtsFile;
 std::vector<trimesh::point> marked3Dpoints;
@@ -965,7 +974,7 @@ void calcPoseEstimation()
 
     bool useRansac = true;
     bool horizontalMirror = false;
-    int cameraFov = 70;
+    int cameraFov = fov * 100;
 
     int tX = imageSize.width / 2;
     int tY = imageSize.height / 2;
@@ -1289,7 +1298,7 @@ void redrawVertex(void *userData)
     DBG_T("Entered");
     //DrawData *data = static_cast<DrawData *>(userData);
 
-    camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
+    //camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
     cls();
 
     // Transform and draw
@@ -1311,6 +1320,60 @@ void redrawVertex(void *userData)
     DBG_T("Done");
 }
 
+#define DOF 10.0f
+#define MAXDOF 10000.0f
+void cameraSetup(const trimesh::point &scene_center, float scene_size)
+{
+    static int cameraSetupDone = 0;
+
+    // Sometimes first frames is garbage therefore I init camera 5 times
+    if (cameraSetupDone == 5)
+        return;
+
+    if (FLAGS_camera_trimesh)
+    {
+        cameraSetupDone = 0; // Make sure we always init camera as zNear/zFar are calculated each frame
+        gCamera = trimesh::GLCamera(); // Comment out when using FOV keys
+        gCamera.setupGL(scene_center, scene_size);
+    }
+    else
+    {
+        GLint V[4];
+        glGetIntegerv(GL_VIEWPORT, V);
+        int width = V[2], height = V[3];
+
+        float fardist;
+        float neardist;
+        if (FLAGS_z_near && FLAGS_z_far)
+        {
+            fardist = FLAGS_z_far;
+            neardist = FLAGS_z_near;
+        }
+        else
+        {
+            fardist = std::max(-(scene_center[2] - scene_size), scene_size / DOF);
+            neardist = std::max(-(scene_center[2] + scene_size), scene_size / MAXDOF);
+        }
+
+        float diag = std::sqrt(float(std::pow(width, 2) + std::pow(height, 2)));
+        float top = (float) height/diag * 0.5f*fov * neardist;
+        float bottom = -top;
+        float right = (float) width/diag * 0.5f*fov * neardist;
+        float left = -right;
+
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glFrustum(left, right, bottom, top, neardist, fardist);
+        //DBG("left [" << left << "], right [" << right << "], bottom [" << bottom <<"], top [" << top <<
+          //  "], neardist [" << neardist << "], fardist [" << fardist << "]");
+
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+    }
+
+    cameraSetupDone++;
+}
+
 void redrawFaces(void *userData)
 {
     DBG_T("Entered");
@@ -1320,13 +1383,7 @@ void redrawFaces(void *userData)
 
     cls();
 
-    static int firstTime = true;
-    if (firstTime)
-    {
-        camera = trimesh::GLCamera();
-        //firstTime = false;
-    }
-    camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
+    cameraSetup(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
     glPushMatrix();
@@ -1351,13 +1408,8 @@ void redrawEdges(void *userData)
 
     //DBG(edges);
     //DBG("\n" << xf);
-    static int firstTime = true;
-    if (firstTime)
-    {
-        camera = trimesh::GLCamera();
-        //firstTime = false;
-    }
-    camera.setupGL(xf * themesh->bsphere.center, themesh->bsphere.r);
+
+    cameraSetup(xf * themesh->bsphere.center, themesh->bsphere.r);
 
     // Transform and draw
     glPushMatrix();
@@ -1460,7 +1512,7 @@ void resetView()
                 throw std::runtime_error("Invalid point. Exiting...");
             }
 
-            DBG("Updaing sample pose Z (Height ) to [" << pWithZ.z << "]");
+            DBG("Updating sample pose Z (Height) to [" << pWithZ.z << "]");
             samplePose.z = pWithZ.z;
         }
 
@@ -1821,19 +1873,6 @@ void updateCvWindow()
     cv::updateWindow(CV_WINDOW_NAME);
 }
 
-// Force windows to redraw its context and call draw callback
-void updateWindows()
-{
-    DBG_T("Entered");
-
-    cv::updateWindow(MAIN_WINDOW_NAME);
-    cv::updateWindow(FACES_WINDOW_NAME);
-    //cv::updateWindow(VERTEX_WINDOW_NAME);
-    //updateCvWindow();
-
-    DBG_T("Done");
-}
-
 // OpenCV Mouse - cv::setMouseCallback()
 //   EVENT_MOUSEMOVE 	indicates that the mouse pointer has moved over the window.
 //   EVENT_LBUTTONDOWN 	indicates that the left mouse button is pressed.
@@ -1895,9 +1934,13 @@ void mouseNavCallbackFunc(int event, int x, int y, int flags, void *userdata)
 
     if (b != trimesh::Mouse::NONE)
     {
-        //DBG(xf);
-        camera.mouse(x, y, b, xf * themesh->bsphere.center, themesh->bsphere.r, xf);
-        //DBG(xf);
+        if (!FLAGS_camera_trimesh)
+        {
+            DBG("Mouse is available only on camera_trimesh. Ignoring");
+            return;
+        }
+
+        gCamera.mouse(x, y, b, xf * themesh->bsphere.center, themesh->bsphere.r, xf);
 
         updateWindows();
     }
@@ -2182,6 +2225,308 @@ cv::Mat getCvMatFromScreen(const std::string &winName)
     return img.clone();
 }
 
+cv::Mat getDepthCvMatFromScreen(const std::string &winName)
+{
+    cv::setOpenGlContext(winName); // Sets the specified window as current OpenGL context
+
+    // Read pixels
+    GLint V[4];
+    glGetIntegerv(GL_VIEWPORT, V);
+    GLint width = V[2], height = V[3];
+    std::unique_ptr<float> buf = std::unique_ptr<float>(new float[width * height]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(V[0], V[1], width, height, GL_DEPTH_COMPONENT, GL_FLOAT, buf.get());
+
+    // Flip top-to-bottom
+    for (int i = 0; i < height / 2; i++)
+    {
+        float *row1 = buf.get() + width * i;
+        float *row2 = buf.get() + width * (height - 1 - i);
+        for (int j = 0; j < width; j++)
+            std::swap(row1[j], row2[j]);
+    }
+
+    cv::Mat img = cv::Mat(cv::Size(width, height), CV_32FC1, buf.get(), cv::Mat::AUTO_STEP).clone();
+
+    return img;
+}
+
+#if 0
+static inline cv::Point3d xfUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
+    const trimesh::xform &curXf, const GLint *view)
+{
+    trimesh::xform xfMat = inv(curXf);
+    trimesh::Vec<3, double> v = xfMat * trimesh::Vec<3, double>(
+        (winX - view[0]) / view[2] * 2.0 - 1.0,
+        (winY - view[1]) / view[3] * 2.0 - 1.0,
+        winZ * 2.0 - 1.0);
+
+    return cv::Point3d(v[0], v[1], v[2]);
+}
+
+static inline cv::Point3d myGluUnProject(GLdouble winX, GLdouble winY, GLdouble winZ,
+    const GLdouble *model, const GLdouble *proj, const GLint *view)
+{
+    trimesh::xform xfMat = inv(trimesh::xform(proj) * trimesh::xform(model));
+    trimesh::Vec<3,double> v = xfMat * trimesh::Vec<3,double>(
+        (winX - view[0]) / view[2] * 2.0 - 1.0,
+        (winY - view[1]) / view[3] * 2.0 - 1.0,
+        winZ * 2.0 - 1.0);
+
+    return cv::Point3d(v[0], v[1], v[2]);
+}
+#endif
+
+#if 0
+void showMatHistogram(const cv::Mat &img, int binsNum = 64)
+{
+    if (img.channels() != 1)
+        throw std::runtime_error("showMatHistogram() currently supports only a single channel matrix");
+
+    cv::Mat hist;
+    cv::calcHist(&img, 1, 0, cv::Mat(), hist, 1, &binsNum, 0);
+    cv::Mat histImage = cv::Mat::ones(200, 320, CV_8U) * 255;
+
+    cv::normalize(hist, hist, 0, histImage.rows, cv::NORM_MINMAX, CV_32F);
+
+    histImage = cv::Scalar::all(255);
+    int binW = cvRound((double)histImage.cols / binsNum);
+
+    for (int i = 0; i < binsNum; i++)
+    {
+        cv::rectangle(histImage, cv::Point(i * binW, histImage.rows),
+            cv::Point((i + 1) * binW, histImage.rows - cvRound(hist.at<float>(i))),
+            cv::Scalar::all(0), -1, 8, 0);
+    }
+
+    cv::imshow("histogram", histImage);
+}
+#endif
+
+void showDepthMap(const cv::Mat &img)
+{
+    double maxVal;
+    cv::minMaxLoc(img, NULL, &maxVal);
+    //DBG("maxVal " << maxVal);
+
+    cv::Mat depthImg;
+    cv::normalize(img, depthImg, 0, 255, cv::NORM_MINMAX, CV_8U, img != maxVal);
+
+    cv::Mat mask = img == maxVal;
+    depthImg.setTo(255, mask);
+
+    //double min, max;
+    //cv::minMaxLoc(depthImg, &min, &max);
+    //DBG("depthImg. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(depthImg));
+
+    cv::imshow(DEPTH_WINDOW_NAME, depthImg);
+}
+
+cv::Mat getWorldDepth()
+{
+    if (FLAGS_camera_trimesh)
+    {
+        DBG("Depth is not supported when camera_trimesh is used - Need to know zNear/zFar");
+        return cv::Mat();
+    }
+
+    cv::Mat depthImg = getDepthCvMatFromScreen(FACES_WINDOW_NAME);
+
+    //double min, max;
+    //cv::minMaxLoc(depthImg, &min, &max, NULL, NULL, depthImg != 1.0);
+    //DBG("depthImg. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(depthImg));
+
+    float zNear = FLAGS_z_near;
+    float zFar = FLAGS_z_far;
+
+    // Taken From -
+    // https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
+    // This seems also relevant-
+    // http://web.archive.org/web/20130416194336/http://olivers.posterous.com/linear-depth-in-glsl-for-real
+
+    // I convert this per-pixel operation to a matrix operation
+    //float z_b = depthImg.at<float>(y, x);
+    //float z_n = 2.0 * z_b - 1.0;
+    //float z_e = 2.0 * zNear * zFar / (zFar + zNear - z_n * (zFar - zNear));
+
+    cv::Mat distImage = depthImg.clone();
+    distImage = zFar + zNear - (2.0 * distImage - 1.0) * (zFar - zNear);
+    cv::divide(2.0 * zNear * zFar, distImage, distImage);
+
+    //double min, max;
+    //cv::minMaxLoc(distImage, &min, &max, NULL, NULL, distImage != zFar);
+    //DBG("distImage. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(distImage));
+    return distImage;
+
+    /*
+
+    //cv::Mat distImage(depthImg.size(), CV_32FC1, cv::Scalar());
+    //cv::Mat distImage = cv::Mat::ones(depthImg.size(), CV_32FC1) * 255;
+    for (int y = 0; y < depthImg.rows; y++)
+    {
+        for (int x = 0; x < depthImg.cols; x++)
+        {
+            if (depthImg.at<float>(y, x) == 1.0)
+            {
+                distImage.at<unsigned char>(y, x) = 255;
+            }
+            else
+            {
+                float zNear = FLAGS_z_near;
+                float zFar = FLAGS_z_far;
+
+                // Taken From -
+                // https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
+                // This seems also relevant-
+                // http://web.archive.org/web/20130416194336/http://olivers.posterous.com/linear-depth-in-glsl-for-real
+                float z_b = depthImg.at<float>(y, x);
+                float z_n = 2.0 * z_b - 1.0;
+                float z_e = 2.0 * zNear * zFar / (zFar + zNear - z_n * (zFar - zNear));
+
+                // moti
+                // FIXME: Since the range is too large I get the entire facade in the same color. How can I pass this
+                // depth data to Python???
+                // Try looking at this image histogram
+                distImage.at<unsigned char>(y, x) = 254.0 * z_e / zFar;
+            }
+        }
+    }
+    cv::minMaxLoc(distImage, &min, &max, NULL, NULL, distImage != 0);
+    DBG("distImage. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(distImage));
+*/
+
+//    cv::Mat worldDepth;
+//    cv::normalize(distImage, worldDepth, 0, 255, cv::NORM_MINMAX, CV_8U);
+
+    //cv::minMaxLoc(worldDepth, &min, &max);
+    //DBG("worldDepth. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(worldDepth));
+    //return distImage;
+
+#if 0
+    //cv::Mat worldDepth(depthImg.size(), CV_8UC1, cv::Scalar());
+
+    cv::Mat depthImg = getDepthCvMatFromScreen(FACES_WINDOW_NAME);
+    double min, max;
+    cv::minMaxLoc(depthImg, &min, &max, NULL, NULL, depthImg != 1.0);
+    DBG("depthImg. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(depthImg));
+
+    cv::Mat worldDepth;
+    cv::normalize(depthImg, worldDepth, 0, 255, cv::NORM_MINMAX, CV_8U);
+
+    cv::minMaxLoc(worldDepth, &min, &max);
+    DBG("worldDepth. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(worldDepth));
+
+    showMatHistogram(worldDepth, 64);
+
+    return worldDepth;
+
+
+/*
+    double min, max;
+    cv::minMaxLoc(depthImg, &min, &max);
+    DBG("depthImg. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(depthImg));
+
+    depthImg -= min;
+    depthImg *= 255.0 / (max - min);
+
+    cv::Mat worldDepth;
+    depthImg.convertTo(worldDepth, CV_8UC1);
+
+    cv::minMaxLoc(worldDepth, &min, &max);
+    DBG("worldDepth. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(worldDepth));
+
+    showMatHistogram(worldDepth, 64);
+
+    return worldDepth;
+*/
+#endif
+
+#if 0
+    cv::Mat depthImg = getDepthCvMatFromScreen(FACES_WINDOW_NAME);
+
+    GLdouble M[16], P[16];
+    GLint V[4];
+    glGetDoublev(GL_MODELVIEW_MATRIX, M);
+    glGetDoublev(GL_PROJECTION_MATRIX, P);
+    glGetIntegerv(GL_VIEWPORT, V);
+
+    cv::Mat distImage(depthImg.size(), CV_32FC1, cv::Scalar());
+    for (int y = 0; y < depthImg.rows; y++)
+    {
+        for (int x = 0; x < depthImg.cols; x++)
+        {
+            if (depthImg.at<float>(y, x) == 1.0)
+                continue;
+
+            cv::Point3d modelP3D = xfUnProject(x, y, depthImg.at<float>(y, x), xf, V);
+            modelP3D -= cv::Point3d(
+                (themesh->bsphere.center)[0],
+                (themesh->bsphere.center)[1],
+                (themesh->bsphere.center)[2]);
+            DBG("modelP3D" << modelP3D);
+            double distL2 = std::sqrt(
+                std::pow(modelP3D.x, 2) +
+                std::pow(modelP3D.y, 2) +
+                std::pow(modelP3D.z, 2));
+
+/*
+            cv::Point3d modelP3D = myGluUnProject(x, y, depthImg.at<float>(y, x), M, P, V);
+            modelP3D += cv::Point3d(
+                (themesh->bsphere.center)[0],
+                (themesh->bsphere.center)[1],
+                (themesh->bsphere.center)[2]);
+
+            trimesh::xform xfInv = inv(xf);
+            cv::Point3f cameraP3D(xfInv[12], xfInv[13], xfInv[14]);
+
+            double distL2 = std::sqrt(
+                std::pow(modelP3D.x - cameraP3D.x, 2) +
+                std::pow(modelP3D.y - cameraP3D.y, 2) +
+                std::pow(modelP3D.z - cameraP3D.z, 2));*/
+            //DBG(themesh->bsphere.center);
+            //DBG("modelP3D" << modelP3D << ", cameraP3D " << cameraP3D << ", distL2 " << distL2);
+
+            distImage.at<float>(y, x) = distL2;
+        }
+    }
+
+    double min, max;
+    cv::minMaxLoc(distImage, &min, &max, NULL, NULL, distImage > 0);
+    DBG("distImage. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(distImage));
+
+    cv::Mat worldDepth;
+    cv::normalize(distImage, worldDepth, 0, 255, cv::NORM_MINMAX, CV_8U);
+
+    cv::minMaxLoc(worldDepth, &min, &max);
+    DBG("worldDepth. min " << min << ", max " << max << ", mat type " << getOpenCVmatType(worldDepth));
+    return worldDepth;
+#endif
+}
+
+// Force windows to redraw its context and call draw callback
+void updateWindows()
+{
+    DBG_T("Entered");
+
+    cv::updateWindow(MAIN_WINDOW_NAME);
+    cv::updateWindow(FACES_WINDOW_NAME);
+    //cv::updateWindow(VERTEX_WINDOW_NAME);
+    //updateCvWindow();
+
+    if (FLAGS_sample_depth)
+    {
+        if  (FLAGS_camera_trimesh)
+            throw std::runtime_error("-sample_depth is currently not possible with -camera_trimesh");
+
+        gDepthMap = getWorldDepth();
+
+        if (FLAGS_visualizations || !gAutoNavigation) // Heavy - Save time on exports
+            showDepthMap(gDepthMap);
+    }
+
+    DBG_T("Done");
+}
+
 cv::Mat convertImgToBinary(const cv::Mat &img)
 {
     cv::Mat binaryImg;
@@ -2288,6 +2633,15 @@ bool checkAndSaveCurrentSceen(const std::string &filePath, cv::Mat *edges = NULL
         return false;
     }
 
+    if (FLAGS_sample_depth)
+    {
+        if (!cv::imwrite(filePath + "_depth.exr", gDepthMap))
+        {
+            std::cout << "Failed saving file " << filePath << std::cout;
+            return false;
+        }
+    }
+
 #if 0
     cv::Mat blurImg = convertImgToBinary(img);
     cv::GaussianBlur(blurImg, blurImg, cv::Size(FLAGS_kernel_size, FLAGS_kernel_size), 0);
@@ -2352,14 +2706,26 @@ void handleMenuKeyboard(int key)
 
     case ')':
     case '0':
+        if (!FLAGS_camera_trimesh)
+        {
+            DBG("FOV change available only on camera_trimesh. Make sure camera is not initialized each time");
+            return;
+        }
+
         fov /= 1.1f;
-        camera.set_fov(fov);
+        gCamera.set_fov(fov);
         std::cout << "New fov value: " << fov << std::endl;
         break;
     case '(':
     case '9':
+        if (!FLAGS_camera_trimesh)
+        {
+            DBG("FOV change available only on camera_trimesh. Make sure camera is not initialized each time");
+            return;
+        }
+
         fov *= 1.1f;
-        camera.set_fov(fov);
+        gCamera.set_fov(fov);
         std::cout << "New fov value: " << fov << std::endl;
         break;
 
@@ -2630,9 +2996,9 @@ void handleKeyboard(int key)
 
     //DBG("key [" << key << "], char [" << (char)key << "]");
 
-    if (gAutoNavigation && key != 'g')
+    if (gAutoNavigation && key != 'g' && key != 'v')
     {
-        DBG("Nav commands not allowd in autoNavigation mode. Press 'g' to exit this mode");
+        DBG("Nav commands not allowed in autoNavigation mode. Press 'g' to exit this mode");
         return;
     }
 
@@ -2640,6 +3006,11 @@ void handleKeyboard(int key)
     {
     case 'g':
         setAutoNavState(!gAutoNavigation);
+        return;
+
+    case 'v':
+        FLAGS_visualizations = !FLAGS_visualizations;
+        DBG("Toggled visualizations mode. -visualizations [" << FLAGS_visualizations << "]");
         return;
 
     case 'n':
@@ -2994,7 +3365,7 @@ cv::Mat createAnglesExportGraph()
 void anglesGraphAddPoint(cv::Mat &anglesGraph, float yaw, float pitch, const cv::Scalar &color, bool show = false)
 {
     cv::circle(anglesGraph, cv::Point(yaw * 2 + 30, anglesGraph.rows + 4 * pitch - 30), 3, color, CV_FILLED);
-    if (show)
+    if (show && FLAGS_visualizations)
         cv::imshow("gAnglesExport", gAnglesExport);
 }
 
@@ -3169,7 +3540,7 @@ void autoNavigate()
             "], samplesData [" << samplesData[gAutoNavigationIdx] << "]");
     }
 
-    if (FLAGS_export_third && gAutoNavigationIdx == FLAGS_export_third * samplesData.size() / 3)
+    if (FLAGS_export_third && gAutoNavigationIdx == int(FLAGS_export_third * samplesData.size() / 3))
     {
         DBG("Done exporting [" << FLAGS_export_third << "] third of [" << (sIsTrain ? "train" : "test") << "] set");
         DBG("Projections num [" << xfSamples.size() / 3 << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" <<
@@ -3178,7 +3549,7 @@ void autoNavigate()
         return;
     }
 
-    if (gAutoNavigationIdx == xfSamples.size())
+    if (gAutoNavigationIdx == int(xfSamples.size()))
     {
         DBG("Done auto navigating over [" << (sIsTrain ? "train" : "test") << "] set. Projections num [" <<
             xfSamples.size() << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum << "]");
@@ -3226,6 +3597,12 @@ void autoNavigate()
             // Saving checkpoint each new dir(Position) gaurntees integrity of anglesExportGraph
             saveCheckPoint(FLAGS_output_dir, getFileName(FLAGS_model), sIsTrain, gAutoNavigationIdx, sExportsNum,
                 sSkipsNum);
+        }
+        // New YAW angle
+        else if (samplesData[gAutoNavigationIdx].yaw != samplesData[gAutoNavigationIdx - 1].yaw)
+        {
+            if (FLAGS_visualizations)
+                updateUpperMapShow();
         }
     }
 
@@ -3382,6 +3759,8 @@ int main(int argc, char* argv[])
 
     cv::namedWindow(UPPER_MAP_WINDOW_NAME, cv::WINDOW_NORMAL);
     cv::setMouseCallback(UPPER_MAP_WINDOW_NAME, mouseUpperMapCallbackFunc, NULL);
+
+    cv::namedWindow(DEPTH_WINDOW_NAME, cv::WINDOW_NORMAL);
 
     // Init cvPhoto window
     //cvPhoto = cv::imread(imageFile);

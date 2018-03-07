@@ -37,7 +37,11 @@ model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_40')
-data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_10_train')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_10_train')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_4800_1600_1600_GridStep_20')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep_20')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_400_400_GridStep_10')
+data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_onlyPos_grid50/')
@@ -45,11 +49,14 @@ data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_Grid
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
 train_dir = os.path.join(data_dir, 'train')
-test_dir = None
-# test_dir = os.path.join(data_dir, 'test')
+# test_dir = None
+test_dir = os.path.join(data_dir, 'test')
 
 roi = (4400, 5500, 800, 800)
 # roi = (5000, 3000, 800, 800)
+# roi = (3000, 4800, 1600, 1600)
+# roi = (3000, 3000, 1600, 1600)
+# roi = (5000, 3000, 400, 400)
 
 # weights_filename = os.path.join(model_sessions_outputs,
 #  'meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5')
@@ -112,13 +119,23 @@ roi = (4400, 5500, 800, 800)
 #                                 'hdf5/meshNet_best_loss_weights.e013-loss0.37574-vloss1.0122.hdf5')
 
 # Grid Step 10- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_01_15-18_24_58_27Epochs_berlinRoi_Grid_Step_10_FullImage_Edges_and_faces_quaternion-low_weight',
+#                                 'hdf5/meshNet_best_loss_weights.e025-loss0.22022-vloss0.1463.hdf5')
+
+# Grid Step 20- ROI 3000_4800_1600_1600 - XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_02_14-10_41_36_Train_120Epochs_berlinRoi_3000_4800_1600_1600_Grid_Step_20_FullImage_Edges_and_faces_quaternion-low_weight',
+#                                 'hdf5/meshNet_best_loss_weights.e113-loss0.22775-vloss0.8356.hdf5')
+
+# Grid Step 20- ROI 3000_3000_1600_1600 - XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
 weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_01_15-18_24_58_20Epochs_berlinRoi_Grid_Step_10_FullImage_Edges_and_faces_quaternion-low_weight',
-                                'hdf5/meshNet_best_loss_weights.e019-loss0.23601-vloss0.1565.hdf5')
+                                'meshNet_2018_03_06-11_43_01_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep_20_FullImage_Edges_and_faces_quaternion-low_weight',
+                                'hdf5/meshNet_best_loss_weights.e045-loss0.35340-vloss0.7885.hdf5')
 
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'edges_on_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces'
+x_type = 'stacked'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_pickle = False
@@ -139,7 +156,7 @@ debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    epochs = 60
+    epochs = initial_epoch + 60
 elif debug_level == 1:  # Medium Debug
     part_of_data = 6500
     epochs = 2

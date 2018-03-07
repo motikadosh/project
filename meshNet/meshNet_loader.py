@@ -93,6 +93,17 @@ class LabelsParser:
             return None
 
 
+def show_depth_img(img):
+    max = img.max()
+    depth_img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1,
+                              mask=(img != max).astype(np.uint8))
+
+    depth_img[img == max] = 255
+
+    cv2.imshow('depth_image', depth_img)
+    cv2.waitKey(0)
+
+
 class ImageProcessor:
     def __init__(self, x_type):
         self.x_type = x_type
@@ -101,6 +112,21 @@ class ImageProcessor:
     def _load_face_image(cur_file, image_size, flip=True):
         face_image = load_image(cur_file[:-len('_edges.png')] + '_faces.png', image_size)
         return flip_imgs_colors(face_image) if flip else face_image
+
+    @staticmethod
+    def _load_depth_map(cur_file, image_size):
+        file_url = cur_file[:-len('_edges.png')] + '_depth.exr'
+        depth_map = cv2.imread(file_url, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+        if depth_map.shape != image_size:
+            # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
+            depth_map = cv2.resize(depth_map, image_size, interpolation=cv2.INTER_AREA)
+        return depth_map
+
+    def allocate_images(self, img_num, image_size):
+        if self.x_type == 'stacked':
+            return np.empty((img_num, image_size[1], image_size[0], 3), dtype=np.float32)
+        else:
+            return np.empty(img_num, dtype=np.object)
 
     def process(self, img, cur_file, label):
         try:
@@ -118,6 +144,14 @@ class ImageProcessor:
                 face_image = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
                 img = cv2.bitwise_or(img, face_image)
                 # imshow('edges_on_faces', img)
+
+            elif self.x_type == 'stacked':
+                img_stack = np.empty((img.shape[0], img.shape[1], 3), dtype=np.float32)
+                img_stack[:, :, 0] = img
+                img_stack[:, :, 1] = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
+                img_stack[:, :, 2] = self._load_depth_map(cur_file, utils.get_image_size(img))
+                # show_depth_img(img_stack[:, :, 2])
+                img = img_stack
 
             else:
                 raise Exception("Unknown x_type")
@@ -205,6 +239,10 @@ class DataLoader:
     def load(self, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(0, 1), y_range=(0, 1),
              x_type='edges', y_type='angle', part_of_data=1.0):
 
+        if x_type == 'stacked':
+            print("Setting x_range=None since x_type=='stacked' - Depth is not in image range [0, 255]")
+            x_range = None
+
         print("Load entered. train_dir [%s], test_dir [%s], image_size [%s], x_range [%s], y_range [%s], x_type [%s], "
               "y_type [%s], part_of_data [%s]" % (train_dir, test_dir, image_size, x_range, y_range, x_type, y_type,
                                                   part_of_data))
@@ -276,11 +314,15 @@ class DataLoader:
         if y_type == 'angle':  # Convert negative angles to 0-360, then take to range [0, 1]
             y[:, 2:] = ((y[:, 2:] + 360) % 360) / 360.0
 
-        x = utils.min_max_scale(x, consts.IMAGE_RANGE, x_range)
+        if x_range is not None:
+            x = utils.min_max_scale(x, consts.IMAGE_RANGE, x_range)
         return x, y
 
     def x_inverse_transform(self, x):
-        return utils.min_max_scale(x, self.x_range, consts.IMAGE_RANGE)
+        if self.x_range is None:
+            return x
+        else:
+            return utils.min_max_scale(x, self.x_range, consts.IMAGE_RANGE)
 
     def y_inverse_transform(self, y):
         if y.ndim == 1:

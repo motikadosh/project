@@ -113,7 +113,7 @@ def my_print_tensor(x, message=''):
 def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, rot_nb_outs=2, weights_path=None,
                    tune=False):
     # creates Posenet from GoogLeNet a.k.a. Inception v1 (Szegedy, 2015)
-    with tf.device('/cpu:0'):
+    with tf.device('/gpu:1'):
         input = Input(shape=image_shape)
         
         conv1 = Convolution2D(64,7,7,subsample=(2,2),border_mode='same',activation='relu',name='conv1')(input)
