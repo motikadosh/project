@@ -4,7 +4,7 @@ from __future__ import division
 import time
 import os
 
-model_type = 'fc'  # 'posenet'/'resnext'/'fc'
+model_type = 'resnet'  # 'posenet'/'resnet'/'fc'
 
 multi_gpu = False
 if not multi_gpu:
@@ -161,7 +161,7 @@ weights_filename = os.path.join(model_sessions_outputs,
 
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'stacked_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = 'depth'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_pickle = False
@@ -169,6 +169,7 @@ render_to_screen = False
 evaluate = True
 load_weights = False
 initial_epoch = 0  # Should have the weights Epoch number + 1
+
 test_only = False
 if test_only:
     load_weights = True
@@ -178,7 +179,7 @@ if test_only:
 batch_size = 32
 save_best_only = True
 
-debug_level = 2
+debug_level = 0
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
@@ -191,6 +192,174 @@ elif debug_level == 2:  # Full Debug
     epochs = 2
 else:
     raise Exception("Invalid debug level " + str(debug_level))
+
+
+# Script config
+title = "meshNet"
+sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else '_Train')
+
+
+# TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
+def main():
+    logger.Logger(sess_info)
+    print("Entered %s" % title)
+
+    if load_weights and use_pickle:
+        # pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
+        #                                 sess_info.title + '.pkl')
+        # loader = meshNet_loader.DataLoader()
+        # loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
+        pass
+    else:
+        loader = meshNet_loader.DataLoader()
+        loader.load(train_dir=train_dir,
+                    test_dir=test_dir,
+                    x_range=(0, 1),
+                    x_type=x_type,
+                    y_type=y_type,
+                    part_of_data=part_of_data)
+
+    # print("Creating a mess - x_train shuffle")
+    # np.random.shuffle(loader.x_train)
+    #  print("Minimal test size (100 samples) - Test will mean nothing")
+    #   loader.x_test = loader.x_test[:100]
+    #   loader.y_test = loader.y_test[:100]
+
+    # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
+
+    print("Getting model...")
+    image_shape = loader.x_train.shape[1:]
+    nb_outs = len(loader.y_train[0])
+
+    if model_type == 'posenet':
+        import posenet
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs-2, 'multi_gpu': multi_gpu}
+        model, model_name = posenet.posenet_train(**params)
+    elif model_type == 'resnet':
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
+
+        # import resnext
+        # model, model_name = resnext.resnext_regression_train(**params)
+
+        # import residual_network
+        # model, model_name = residual_network.resnext_regression_train(**params)
+
+        import resnet50
+        model, model_name = resnet50.resnet50_regression_train(**params)
+
+    elif model_type == 'fc':
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
+
+        model, model_name = meshNet_model.meshNet_fc(**params)
+
+    else:
+        # Custom loss is mandatory to take 360 degrees into consideration
+        # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
+        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
+        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
+        # model, model_name = meshNet_model.almost_VGG11_bn(**params)
+        raise ValueError("Unsupported model type:", model_type)
+
+    if load_weights:
+        meshNet_model.load_model_weights(model, weights_filename)
+
+    model.summary()
+    print("")
+
+    print("image_shape:", image_shape)
+    print("nb_outs:", nb_outs)
+    print("Model name:", model_name)
+    print("Model function input arguments:", params)
+    print("Batch size:", batch_size)
+    print("")
+
+    print("Model type:", model_type)
+    print("Multi GPU:", multi_gpu)
+    print("Model params number:", model.count_params())
+    print("Model loss type: %s" % model.loss)
+    print("Model optimizer:", model.optimizer)
+    print("")
+
+    print("x_type:", loader.x_type)
+    print("y_type:", loader.y_type)
+    print("y_min_max:", loader.y_min_max)
+    print("y range:", loader.y_min_max[1] - loader.y_min_max[0])
+    print("")
+
+    if not test_only:
+        print("Training model...")
+        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
+                                                 tensor_board=False)
+
+        if model_type == 'posenet':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:],
+                                                 loader.y_train[:, :2], loader.y_train[:, 2:],
+                                                 loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test,
+                                                 [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                                  loader.y_test[:, :2], loader.y_test[:, 2:],
+                                                  loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        elif model_type == 'resnet':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        elif model_type == 'fc':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        else:
+            # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
+            #                     callbacks=callbacks, validation_data=(loader.x_test, loader.y_test), shuffle=True,
+            #                     initial_epoch=initial_epoch)
+            raise ValueError("Unsupported model type:", model_type)
+
+        meshNet_model.load_best_weights(model, sess_info)
+    else:
+        history = None
+
+    if evaluate:
+        print("Evaluating model. Test shape", loader.y_test.shape)
+        if model_type == 'posenet':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                         loader.y_test[:, :2], loader.y_test[:, 2:],
+                                         loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
+        elif model_type == 'resnet':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                         batch_size=batch_size, verbose=0)
+        elif model_type == 'fc':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                         batch_size=batch_size, verbose=0)
+        else:
+            # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
+            raise ValueError("Unsupported model type:", model_type)
+
+        print('Evaluate results:')
+        for i, metric in enumerate(model.metrics_names):
+            print(metric, ":", test_scores[i])
+
+    # if not test_only:
+    #     loader.save_pickle(sess_info)
+
+    if history:
+        visualize.visualize_history(history, sess_info, render_to_screen)
+
+    if model_type == 'posenet':
+        # TODO: Choose best output according to test_score
+        # detailed_evaluation(model, loader, 1)
+        # detailed_evaluation(model, loader, 2)
+        detailed_evaluation(model, loader, 3)
+    elif model_type == 'resnet':
+        detailed_evaluation(model, loader, 1)
+    elif model_type == 'fc':
+        detailed_evaluation(model, loader, 1)
+    else:
+        raise ValueError("Unsupported model type:", model_type)
+
+    print("Done")
 
 
 def predict(model, x):
@@ -224,9 +393,11 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
 
     print("%s errors..." % dataset_name)
     xy_error = utils.xy_dist(y[:, :2], y_pred[:, :2])
-    print("%s xy error. Mean %s, std %s" % (dataset_name, np.mean(xy_error), np.std(xy_error)))
+    print("%s xy error. Mean %s, median %s, std %s" % (dataset_name, np.mean(xy_error), np.median(xy_error),
+                                                       np.std(xy_error)))
     angle_error = utils.rotation_error(y[:, 2:], y_pred[:, 2:], normalized=normalized)
-    print("%s angle error. Mean %s, std %s" % (dataset_name, np.mean(angle_error), np.std(angle_error)))
+    print("%s angle error. Mean %s, median %s, std %s" % (dataset_name, np.mean(angle_error), np.median(angle_error),
+                                                          np.std(angle_error)))
 
     return xy_error, angle_error
 
@@ -234,7 +405,7 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
 # visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
 def detailed_evaluation(model, loader, output_number):
     """ output_number: PoseNet has total of 6 outputs. 3 pairs of [xy_out, rot_out]
-                       ResNext has single output pair [xy_out, rot_out]
+                       ResNet/FC has single output pair [xy_out, rot_out]
     """
     print("detailed evaluation...")
 
@@ -303,169 +474,6 @@ def detailed_evaluation(model, loader, output_number):
                             save_path=os.path.join(plots_dir, hist_fname))
     except Exception as e:
         print("Warning: {}".format(e))
-
-
-# Script config
-title = "meshNet"
-sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else '_Train')
-
-
-# TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
-def main():
-    logger.Logger(sess_info)
-    print("Entered %s" % title)
-
-    if load_weights and use_pickle:
-        # pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
-        #                                 sess_info.title + '.pkl')
-        # loader = meshNet_loader.DataLoader()
-        # loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
-        pass
-    else:
-        loader = meshNet_loader.DataLoader()
-        loader.load(train_dir=train_dir,
-                    test_dir=test_dir,
-                    x_range=(0, 1),
-                    x_type=x_type,
-                    y_type=y_type,
-                    part_of_data=part_of_data)
-
-    # print("Creating a mess - x_train shuffle")
-    # np.random.shuffle(loader.x_train)
-    #  print("Minimal test size (100 samples) - Test will mean nothing")
-    #   loader.x_test = loader.x_test[:100]
-    #   loader.y_test = loader.y_test[:100]
-
-    # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
-
-    print("Getting model...")
-    image_shape = loader.x_train.shape[1:]
-    nb_outs = len(loader.y_train[0])
-
-    if model_type == 'posenet':
-        import posenet
-        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs-2, 'multi_gpu': multi_gpu}
-        model, model_name = posenet.posenet_train(**params)
-    elif model_type == 'resnext':
-        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
-
-        import resnext
-        model, model_name = resnext.resnext_regression_train(**params)
-
-        # import residual_network
-        # model, model_name = residual_network.resnext_regression_train(**params)
-
-    elif model_type == 'fc':
-        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
-
-        model, model_name = meshNet_model.meshNet_fc(**params)
-
-    else:
-        # Custom loss is mandatory to take 360 degrees into consideration
-        # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
-        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
-        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
-        # model, model_name = meshNet_model.almost_VGG11_bn(**params)
-        raise ValueError("Unsupported model type:", model_type)
-
-    if load_weights:
-        meshNet_model.load_model_weights(model, weights_filename)
-
-    model.summary()
-    print("")
-
-    print("image_shape:", image_shape)
-    print("nb_outs:", nb_outs)
-    print("Model name:", model_name)
-    print("Model function input arguments:", params)
-    print("Batch size:", batch_size)
-    print("")
-
-    print("Model type:", model_type)
-    print("Multi GPU:", multi_gpu)
-    print("Model params number:", model.count_params())
-    print("Model loss type: %s" % model.loss)
-    print("Model optimizer:", model.optimizer)
-    print("")
-
-    print("x_type:", loader.x_type)
-    print("y_type:", loader.y_type)
-    print("y_min_max:", loader.y_min_max)
-    print("y range:", loader.y_min_max[1] - loader.y_min_max[0])
-    print("")
-
-    if not test_only:
-        print("Training model...")
-        callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
-                                                 tensor_board=False)
-
-        if model_type == 'posenet':
-            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:],
-                                                 loader.y_train[:, :2], loader.y_train[:, 2:],
-                                                 loader.y_train[:, :2], loader.y_train[:, 2:]],
-                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
-                                validation_data=(loader.x_test,
-                                                 [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                                  loader.y_test[:, :2], loader.y_test[:, 2:],
-                                                  loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
-        elif model_type == 'resnext':
-            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
-                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
-                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
-        elif model_type == 'fc':
-            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
-                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
-                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
-        else:
-            # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
-            #                     callbacks=callbacks, validation_data=(loader.x_test, loader.y_test), shuffle=True,
-            #                     initial_epoch=initial_epoch)
-            raise ValueError("Unsupported model type:", model_type)
-
-        meshNet_model.load_best_weights(model, sess_info)
-    else:
-        history = None
-
-    if evaluate:
-        print("Evaluating model. Test shape", loader.y_test.shape)
-        if model_type == 'posenet':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                         loader.y_test[:, :2], loader.y_test[:, 2:],
-                                         loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
-        elif model_type == 'resnext':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
-                                         batch_size=batch_size, verbose=0)
-        elif model_type == 'fc':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
-                                         batch_size=batch_size, verbose=0)
-        else:
-            # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
-            raise ValueError("Unsupported model type:", model_type)
-
-        print('Evaluate results:')
-        for i, metric in enumerate(model.metrics_names):
-            print(metric, ":", test_scores[i])
-
-    # if not test_only:
-    #     loader.save_pickle(sess_info)
-
-    if history:
-        visualize.visualize_history(history, sess_info, render_to_screen)
-
-    if model_type == 'posenet':
-        # TODO: Choose best output according to test_score
-        # detailed_evaluation(model, loader, 1)
-        # detailed_evaluation(model, loader, 2)
-        detailed_evaluation(model, loader, 3)
-    elif model_type == 'resnext':
-        detailed_evaluation(model, loader, 1)
-    elif model_type == 'fc':
-        detailed_evaluation(model, loader, 1)
-    else:
-        raise ValueError("Unsupported model type:", model_type)
 
 
 if __name__ == '__main__':

@@ -265,8 +265,8 @@ class DataLoader:
     def load(self, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(0, 1), y_range=(0, 1),
              x_type='edges', y_type='angle', part_of_data=1.0):
 
-        if x_type == 'stacked':
-            print("Setting x_range=None since x_type=='stacked' - Depth is not in image range [0, 255]")
+        if x_type == 'depth':
+            print("Setting x_range=None since x_type=='depth' - Depth is not in image range [0, 255]")
             x_range = None
 
         print("Load entered. train_dir [%s], test_dir [%s], image_size [%s], x_range [%s], y_range [%s], x_type [%s], "
