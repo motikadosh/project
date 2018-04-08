@@ -4,7 +4,11 @@ from __future__ import division
 import time
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+model_type = 'fc'  # 'posenet'/'resnext'/'fc'
+
+multi_gpu = False
+if not multi_gpu:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import numpy as np
 
@@ -42,6 +46,8 @@ model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_400_400_GridStep_10')
 data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep10_depth_train')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep20_depth_train')
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_onlyPos_grid50/')
@@ -129,13 +135,33 @@ roi = (4400, 5500, 800, 800)
 #                                 'hdf5/meshNet_best_loss_weights.e113-loss0.22775-vloss0.8356.hdf5')
 
 # Grid Step 20- ROI 3000_3000_1600_1600 - XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_03_06-11_43_01_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep_20_FullImage_Edges_and_faces_quaternion-low_weight',
+#                                 'hdf5/meshNet_best_loss_weights.e045-loss0.35340-vloss0.7885.hdf5')
+
+# Grid Step 10- ROI 4400_5500_800_800 - XY+Angles + Entire image + stacked faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_03_16-14_37_14_Train_120Epochs_berlinRoi_4400_5500_800_800_GridStep10_stacked_faces/',
+#                                 'hdf5/meshNet_best_loss_weights.e021-loss0.20523-vloss0.1398.hdf5')
+
+# Grid Step 10- ROI 5000_3000_800_800 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_03_18-12_04_25_Train_100Epochs_berlinRoi_5000_3000_800_800_GridStep10_stacked',
+#                                 'hdf5/meshNet_best_loss_weights.e025-loss0.22284-vloss0.2038.hdf5')
+
+# Grid Step 20- ROI 3000_3000_1600_1600 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
+# weights_filename = os.path.join(model_sessions_outputs,
+#                                 'meshNet_2018_03_19-14_04_56_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep20_stacked',
+#                                 'hdf5/meshNet_best_loss_weights.e035-loss0.39286-vloss0.4575.hdf5')
+
+# Grid Step 20- ROI 4400 5500_800 800 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
 weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_03_06-11_43_01_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep_20_FullImage_Edges_and_faces_quaternion-low_weight',
-                                'hdf5/meshNet_best_loss_weights.e045-loss0.35340-vloss0.7885.hdf5')
+                                'meshNet_2018_03_09-21_34_54_Train_200Epochs_berlinRoi_4400_5500_800_800_GridStep20_depth',
+                                'hdf5/meshNet_best_loss_weights.e178-loss0.07943-vloss0.3533.hdf5')
 
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'stacked'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked'
+x_type = 'stacked_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_pickle = False
@@ -152,13 +178,13 @@ if test_only:
 batch_size = 32
 save_best_only = True
 
-debug_level = 0
+debug_level = 2
 
 if debug_level == 0:    # No Debug
     part_of_data = 1.0
-    epochs = initial_epoch + 60
+    epochs = initial_epoch + 120
 elif debug_level == 1:  # Medium Debug
-    part_of_data = 6500
+    part_of_data = 3000
     epochs = 2
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
@@ -206,7 +232,10 @@ def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
 
 
 # visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
-def detailed_evaluation(model, loader, posenet_output=3):
+def detailed_evaluation(model, loader, output_number):
+    """ output_number: PoseNet has total of 6 outputs. 3 pairs of [xy_out, rot_out]
+                       ResNext has single output pair [xy_out, rot_out]
+    """
     print("detailed evaluation...")
 
     print("Predicting train set...")
@@ -220,9 +249,8 @@ def detailed_evaluation(model, loader, posenet_output=3):
     # l2_test_loss = calc_loss(loader.y_test, y_test_pred)
     # print("Test l2 loss", l2_test_loss)
 
-    # PoseNet Fix
-    print("Using PoseNet output [%d]" % posenet_output)
-    xyz_output = (posenet_output - 1) * 2
+    print("Using output number:", output_number)
+    xyz_output = (output_number - 1) * 2
     rotation_output = xyz_output + 1
     y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[rotation_output]), axis=-1)
     y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[rotation_output]), axis=-1)
@@ -302,20 +330,43 @@ def main():
                     y_type=y_type,
                     part_of_data=part_of_data)
 
+    # print("Creating a mess - x_train shuffle")
+    # np.random.shuffle(loader.x_train)
+    #  print("Minimal test size (100 samples) - Test will mean nothing")
+    #   loader.x_test = loader.x_test[:100]
+    #   loader.y_test = loader.y_test[:100]
+
     # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 
     print("Getting model...")
     image_shape = loader.x_train.shape[1:]
     nb_outs = len(loader.y_train[0])
 
-    # Custom loss is mandatory to take 360 degrees into consideration
-    # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
-    # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
-    # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
-    # model, model_name = meshNet_model.almost_VGG11_bn(**params)
-    import posenet
-    params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs-2}
-    model, model_name = posenet.posenet_train(**params)
+    if model_type == 'posenet':
+        import posenet
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs-2, 'multi_gpu': multi_gpu}
+        model, model_name = posenet.posenet_train(**params)
+    elif model_type == 'resnext':
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
+
+        import resnext
+        model, model_name = resnext.resnext_regression_train(**params)
+
+        # import residual_network
+        # model, model_name = residual_network.resnext_regression_train(**params)
+
+    elif model_type == 'fc':
+        params = {'image_shape': image_shape, 'xy_nb_outs': 2, 'rot_nb_outs': nb_outs - 2, 'multi_gpu': multi_gpu}
+
+        model, model_name = meshNet_model.meshNet_fc(**params)
+
+    else:
+        # Custom loss is mandatory to take 360 degrees into consideration
+        # params = {'image_shape': image_shape, 'nb_outs': nb_outs, 'loss': meshNet_model.meshNet_loss}
+        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense(**params)
+        # model, model_name = meshNet_model.reg_2_conv_relu_mp_2_conv_relu_dense_dense_bigger(**params)
+        # model, model_name = meshNet_model.almost_VGG11_bn(**params)
+        raise ValueError("Unsupported model type:", model_type)
 
     if load_weights:
         meshNet_model.load_model_weights(model, weights_filename)
@@ -330,6 +381,8 @@ def main():
     print("Batch size:", batch_size)
     print("")
 
+    print("Model type:", model_type)
+    print("Multi GPU:", multi_gpu)
     print("Model params number:", model.count_params())
     print("Model loss type: %s" % model.loss)
     print("Model optimizer:", model.optimizer)
@@ -346,17 +399,31 @@ def main():
         callbacks = meshNet_model.get_checkpoint(sess_info, is_classification=False, save_best_only=save_best_only,
                                                  tensor_board=False)
 
-        history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:],
-                                             loader.y_train[:, :2], loader.y_train[:, 2:],
-                                             loader.y_train[:, :2], loader.y_train[:, 2:]],
-                            batch_size=batch_size, epochs=epochs, callbacks=callbacks,
-                            validation_data=(loader.x_test,
-                                             [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                              loader.y_test[:, :2], loader.y_test[:, 2:],
-                                              loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                            shuffle=True, initial_epoch=initial_epoch)
-        # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
-        # callbacks=callbacks, validation_data = (loader.x_test, loader.y_test), shuffle = True)
+        if model_type == 'posenet':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:],
+                                                 loader.y_train[:, :2], loader.y_train[:, 2:],
+                                                 loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test,
+                                                 [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                                  loader.y_test[:, :2], loader.y_test[:, 2:],
+                                                  loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        elif model_type == 'resnext':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        elif model_type == 'fc':
+            history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
+                                batch_size=batch_size, epochs=epochs, callbacks=callbacks,
+                                validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
+                                shuffle=True, initial_epoch=initial_epoch)
+        else:
+            # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
+            #                     callbacks=callbacks, validation_data=(loader.x_test, loader.y_test), shuffle=True,
+            #                     initial_epoch=initial_epoch)
+            raise ValueError("Unsupported model type:", model_type)
 
         meshNet_model.load_best_weights(model, sess_info)
     else:
@@ -364,10 +431,19 @@ def main():
 
     if evaluate:
         print("Evaluating model. Test shape", loader.y_test.shape)
-        test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                    loader.y_test[:, :2], loader.y_test[:, 2:],
-                                    loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
-        # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
+        if model_type == 'posenet':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                         loader.y_test[:, :2], loader.y_test[:, 2:],
+                                         loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
+        elif model_type == 'resnext':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                         batch_size=batch_size, verbose=0)
+        elif model_type == 'fc':
+            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                         batch_size=batch_size, verbose=0)
+        else:
+            # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
+            raise ValueError("Unsupported model type:", model_type)
 
         print('Evaluate results:')
         for i, metric in enumerate(model.metrics_names):
@@ -379,10 +455,17 @@ def main():
     if history:
         visualize.visualize_history(history, sess_info, render_to_screen)
 
-    # TODO: Choose best output according to test_score
-    # detailed_evaluation(model, loader, 1)
-    # detailed_evaluation(model, loader, 2)
-    detailed_evaluation(model, loader, 3)
+    if model_type == 'posenet':
+        # TODO: Choose best output according to test_score
+        # detailed_evaluation(model, loader, 1)
+        # detailed_evaluation(model, loader, 2)
+        detailed_evaluation(model, loader, 3)
+    elif model_type == 'resnext':
+        detailed_evaluation(model, loader, 1)
+    elif model_type == 'fc':
+        detailed_evaluation(model, loader, 1)
+    else:
+        raise ValueError("Unsupported model type:", model_type)
 
 
 if __name__ == '__main__':

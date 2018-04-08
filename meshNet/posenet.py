@@ -11,6 +11,7 @@ from keras.layers import merge, Reshape, Activation, BatchNormalization
 from keras import backend as K
 from keras.models import Model
 from keras.optimizers import Adam, Adadelta
+
 import tensorflow as tf
 import numpy as np
 
@@ -113,306 +114,305 @@ def my_print_tensor(x, message=''):
 def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, rot_nb_outs=2, weights_path=None,
                    tune=False):
     # creates Posenet from GoogLeNet a.k.a. Inception v1 (Szegedy, 2015)
-    with tf.device('/gpu:1'):
-        input = Input(shape=image_shape)
-        
-        conv1 = Convolution2D(64,7,7,subsample=(2,2),border_mode='same',activation='relu',name='conv1')(input)
-        
-        pool1 = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='pool1')(conv1)
+    input = Input(shape=image_shape)
 
-        norm1 = BatchNormalization(axis=3, name='norm1')(pool1)
-        
-        reduction2 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='reduction2')(norm1)
-        
-        conv2 = Convolution2D(192,3,3,border_mode='same',activation='relu',name='conv2')(reduction2)
+    conv1 = Convolution2D(64,7,7,subsample=(2,2),border_mode='same',activation='relu',name='conv1')(input)
 
-        norm2 = BatchNormalization(axis=3, name='norm2')(conv2)
-        
-        pool2 = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='valid',name='pool2')(norm2)
+    pool1 = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='pool1')(conv1)
 
-        icp1_reduction1 = Convolution2D(96,1,1,border_mode='same',activation='relu',name='icp1_reduction1')(pool2)
+    norm1 = BatchNormalization(axis=3, name='norm1')(pool1)
 
-        icp1_out1 = Convolution2D(128,3,3,border_mode='same',activation='relu',name='icp1_out1')(icp1_reduction1)
-        
+    reduction2 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='reduction2')(norm1)
 
-        icp1_reduction2 = Convolution2D(16,1,1,border_mode='same',activation='relu',name='icp1_reduction2')(pool2)
+    conv2 = Convolution2D(192,3,3,border_mode='same',activation='relu',name='conv2')(reduction2)
 
-        icp1_out2 = Convolution2D(32,5,5,border_mode='same',activation='relu',name='icp1_out2')(icp1_reduction2)
-        
+    norm2 = BatchNormalization(axis=3, name='norm2')(conv2)
 
-        icp1_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp1_pool')(pool2)
+    pool2 = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='valid',name='pool2')(norm2)
 
-        icp1_out3 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp1_out3')(icp1_pool)
+    icp1_reduction1 = Convolution2D(96,1,1,border_mode='same',activation='relu',name='icp1_reduction1')(pool2)
 
-       
-        icp1_out0 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp1_out0')(pool2)
+    icp1_out1 = Convolution2D(128,3,3,border_mode='same',activation='relu',name='icp1_out1')(icp1_reduction1)
 
-        
-        icp2_in = merge([icp1_out0, icp1_out1, icp1_out2, icp1_out3],mode='concat',concat_axis=3,name='icp2_in')
 
+    icp1_reduction2 = Convolution2D(16,1,1,border_mode='same',activation='relu',name='icp1_reduction2')(pool2)
 
-        
-        
+    icp1_out2 = Convolution2D(32,5,5,border_mode='same',activation='relu',name='icp1_out2')(icp1_reduction2)
 
 
-        icp2_reduction1 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp2_reduction1')(icp2_in)
+    icp1_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp1_pool')(pool2)
 
-        icp2_out1 = Convolution2D(192,3,3,border_mode='same',activation='relu',name='icp2_out1')(icp2_reduction1)
-        
-       
-        icp2_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp2_reduction2')(icp2_in)
+    icp1_out3 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp1_out3')(icp1_pool)
 
-        icp2_out2 = Convolution2D(96,5,5,border_mode='same',activation='relu',name='icp2_out2')(icp2_reduction2)
 
+    icp1_out0 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp1_out0')(pool2)
 
-        icp2_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp2_pool')(icp2_in)
 
-        icp2_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp2_out3')(icp2_pool)
+    icp2_in = merge([icp1_out0, icp1_out1, icp1_out2, icp1_out3],mode='concat',concat_axis=3,name='icp2_in')
 
 
-        icp2_out0 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp2_out0')(icp2_in)
 
-        
-        icp2_out = merge([icp2_out0, icp2_out1, icp2_out2, icp2_out3],mode='concat',concat_axis=3,name='icp2_out')
 
 
 
+    icp2_reduction1 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp2_reduction1')(icp2_in)
 
+    icp2_out1 = Convolution2D(192,3,3,border_mode='same',activation='relu',name='icp2_out1')(icp2_reduction1)
 
 
-        icp3_in = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='icp3_in')(icp2_out)
+    icp2_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp2_reduction2')(icp2_in)
 
-        icp3_reduction1 = Convolution2D(96,1,1,border_mode='same',activation='relu',name='icp3_reduction1')(icp3_in)
+    icp2_out2 = Convolution2D(96,5,5,border_mode='same',activation='relu',name='icp2_out2')(icp2_reduction2)
 
-        icp3_out1 = Convolution2D(208,3,3,border_mode='same',activation='relu',name='icp3_out1')(icp3_reduction1)
 
+    icp2_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp2_pool')(icp2_in)
 
-        icp3_reduction2 = Convolution2D(16,1,1,border_mode='same',activation='relu',name='icp3_reduction2')(icp3_in)
+    icp2_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp2_out3')(icp2_pool)
 
-        icp3_out2 = Convolution2D(48,5,5,border_mode='same',activation='relu',name='icp3_out2')(icp3_reduction2)
-        
 
-        icp3_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp3_pool')(icp3_in)
+    icp2_out0 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp2_out0')(icp2_in)
 
-        icp3_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp3_out3')(icp3_pool)
 
-        
-        icp3_out0 = Convolution2D(192,1,1,border_mode='same',activation='relu',name='icp3_out0')(icp3_in)
-        
-        
-        icp3_out = merge([icp3_out0, icp3_out1, icp3_out2, icp3_out3],mode='concat',concat_axis=3,name='icp3_out')
+    icp2_out = merge([icp2_out0, icp2_out1, icp2_out2, icp2_out3],mode='concat',concat_axis=3,name='icp2_out')
 
 
 
 
 
-        # Moti- Change pool_size -> (2,2)
-        # cls1_pool = AveragePooling2D(pool_size=(5,5),strides=(3,3),border_mode='valid',name='cls1_pool')(icp3_out)
-        cls1_pool = AveragePooling2D(pool_size=(2, 2), border_mode='valid', name='cls1_pool')(icp3_out)
-        cls1_reduction_pose = Convolution2D(128,1,1,border_mode='same',activation='relu',name='cls1_reduction_pose')(cls1_pool)
 
+    icp3_in = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='icp3_in')(icp2_out)
 
-        cls1_fc1_flat = Flatten()(cls1_reduction_pose)
-        
-        cls1_fc1_pose = Dense(1024,activation='relu',name='cls1_fc1_pose')(cls1_fc1_flat)
+    icp3_reduction1 = Convolution2D(96,1,1,border_mode='same',activation='relu',name='icp3_reduction1')(icp3_in)
 
-        cls1_fc_pose_xyz = Dense(xy_nb_outs,name='cls1_fc_pose_xyz')(cls1_fc1_pose)
-        
-        cls1_fc_pose_wpqr = Dense(rot_nb_outs, name='cls1_fc_pose_wpqr')(cls1_fc1_pose)
+    icp3_out1 = Convolution2D(208,3,3,border_mode='same',activation='relu',name='icp3_out1')(icp3_reduction1)
 
 
+    icp3_reduction2 = Convolution2D(16,1,1,border_mode='same',activation='relu',name='icp3_reduction2')(icp3_in)
 
+    icp3_out2 = Convolution2D(48,5,5,border_mode='same',activation='relu',name='icp3_out2')(icp3_reduction2)
 
 
-        
-        icp4_reduction1 = Convolution2D(112,1,1,border_mode='same',activation='relu',name='icp4_reduction1')(icp3_out)
+    icp3_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp3_pool')(icp3_in)
 
-        icp4_out1 = Convolution2D(224,3,3,border_mode='same',activation='relu',name='icp4_out1')(icp4_reduction1)
+    icp3_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp3_out3')(icp3_pool)
 
-        
-        icp4_reduction2 = Convolution2D(24,1,1,border_mode='same',activation='relu',name='icp4_reduction2')(icp3_out)
 
-        icp4_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp4_out2')(icp4_reduction2)
+    icp3_out0 = Convolution2D(192,1,1,border_mode='same',activation='relu',name='icp3_out0')(icp3_in)
 
 
-        icp4_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp4_pool')(icp3_out)
+    icp3_out = merge([icp3_out0, icp3_out1, icp3_out2, icp3_out3],mode='concat',concat_axis=3,name='icp3_out')
 
-        icp4_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp4_out3')(icp4_pool)
 
 
-        icp4_out0 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp4_out0')(icp3_out)
 
-        
-        icp4_out = merge([icp4_out0, icp4_out1, icp4_out2, icp4_out3],mode='concat',concat_axis=3,name='icp4_out')
 
+    # Moti- Change pool_size -> (2,2)
+    # cls1_pool = AveragePooling2D(pool_size=(5,5),strides=(3,3),border_mode='valid',name='cls1_pool')(icp3_out)
+    cls1_pool = AveragePooling2D(pool_size=(2, 2), border_mode='valid', name='cls1_pool')(icp3_out)
+    cls1_reduction_pose = Convolution2D(128,1,1,border_mode='same',activation='relu',name='cls1_reduction_pose')(cls1_pool)
 
 
+    cls1_fc1_flat = Flatten()(cls1_reduction_pose)
 
+    cls1_fc1_pose = Dense(1024,activation='relu',name='cls1_fc1_pose')(cls1_fc1_flat)
 
+    cls1_fc_pose_xyz = Dense(xy_nb_outs,name='cls1_fc_pose_xyz')(cls1_fc1_pose)
 
-        icp5_reduction1 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp5_reduction1')(icp4_out)
+    cls1_fc_pose_wpqr = Dense(rot_nb_outs, name='cls1_fc_pose_wpqr')(cls1_fc1_pose)
 
-        icp5_out1 = Convolution2D(256,3,3,border_mode='same',activation='relu',name='icp5_out1')(icp5_reduction1)
 
 
-        icp5_reduction2 = Convolution2D(24,1,1,border_mode='same',activation='relu',name='icp5_reduction2')(icp4_out)
 
-        icp5_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp5_out2')(icp5_reduction2)
 
 
-        icp5_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp5_pool')(icp4_out)
+    icp4_reduction1 = Convolution2D(112,1,1,border_mode='same',activation='relu',name='icp4_reduction1')(icp3_out)
 
-        icp5_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp5_out3')(icp5_pool)
+    icp4_out1 = Convolution2D(224,3,3,border_mode='same',activation='relu',name='icp4_out1')(icp4_reduction1)
 
 
-        icp5_out0 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp5_out0')(icp4_out)
+    icp4_reduction2 = Convolution2D(24,1,1,border_mode='same',activation='relu',name='icp4_reduction2')(icp3_out)
 
-        
-        icp5_out = merge([icp5_out0, icp5_out1, icp5_out2, icp5_out3],mode='concat',concat_axis=3,name='icp5_out')
+    icp4_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp4_out2')(icp4_reduction2)
 
 
+    icp4_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp4_pool')(icp3_out)
 
+    icp4_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp4_out3')(icp4_pool)
 
 
+    icp4_out0 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp4_out0')(icp3_out)
 
-        icp6_reduction1 = Convolution2D(144,1,1,border_mode='same',activation='relu',name='icp6_reduction1')(icp5_out)
 
-        icp6_out1 = Convolution2D(288,3,3,border_mode='same',activation='relu',name='icp6_out1')(icp6_reduction1)
+    icp4_out = merge([icp4_out0, icp4_out1, icp4_out2, icp4_out3],mode='concat',concat_axis=3,name='icp4_out')
 
-        
-        icp6_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp6_reduction2')(icp5_out)
 
-        icp6_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp6_out2')(icp6_reduction2)
 
-        
-        icp6_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp6_pool')(icp5_out)
 
-        icp6_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp6_out3')(icp6_pool)
 
 
-        icp6_out0 = Convolution2D(112,1,1,border_mode='same',activation='relu',name='icp6_out0')(icp5_out)
+    icp5_reduction1 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp5_reduction1')(icp4_out)
 
-        
-        icp6_out = merge([icp6_out0, icp6_out1, icp6_out2, icp6_out3],mode='concat',concat_axis=3,name='icp6_out')
-        
+    icp5_out1 = Convolution2D(256,3,3,border_mode='same',activation='relu',name='icp5_out1')(icp5_reduction1)
 
 
+    icp5_reduction2 = Convolution2D(24,1,1,border_mode='same',activation='relu',name='icp5_reduction2')(icp4_out)
 
+    icp5_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp5_out2')(icp5_reduction2)
 
-        # Moti- Change pool_size -> (2,2)
-        # cls2_pool = AveragePooling2D(pool_size=(5,5),strides=(3,3),border_mode='valid',name='cls2_pool')(icp6_out)
-        cls2_pool = AveragePooling2D(pool_size=(2,2),border_mode='valid',name='cls2_pool')(icp6_out)
-        cls2_reduction_pose = Convolution2D(128,1,1,border_mode='same',activation='relu',name='cls2_reduction_pose')(cls2_pool)
 
+    icp5_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp5_pool')(icp4_out)
 
-        cls2_fc1_flat = Flatten()(cls2_reduction_pose)
+    icp5_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp5_out3')(icp5_pool)
 
-        cls2_fc1 = Dense(1024,activation='relu',name='cls2_fc1')(cls2_fc1_flat)
-        
-        cls2_fc_pose_xyz = Dense(xy_nb_outs,name='cls2_fc_pose_xyz')(cls2_fc1)
-        
-        cls2_fc_pose_wpqr = Dense(rot_nb_outs, name='cls2_fc_pose_wpqr')(cls2_fc1)
 
+    icp5_out0 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp5_out0')(icp4_out)
 
 
+    icp5_out = merge([icp5_out0, icp5_out1, icp5_out2, icp5_out3],mode='concat',concat_axis=3,name='icp5_out')
 
 
 
-        icp7_reduction1 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp7_reduction1')(icp6_out)
 
-        icp7_out1 = Convolution2D(320,3,3,border_mode='same',activation='relu',name='icp7_out1')(icp7_reduction1)
 
 
-        icp7_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp7_reduction2')(icp6_out)
+    icp6_reduction1 = Convolution2D(144,1,1,border_mode='same',activation='relu',name='icp6_reduction1')(icp5_out)
 
-        icp7_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp7_out2')(icp7_reduction2)
+    icp6_out1 = Convolution2D(288,3,3,border_mode='same',activation='relu',name='icp6_out1')(icp6_reduction1)
 
 
-        icp7_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp7_pool')(icp6_out)
+    icp6_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp6_reduction2')(icp5_out)
 
-        icp7_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp7_out3')(icp7_pool)
+    icp6_out2 = Convolution2D(64,5,5,border_mode='same',activation='relu',name='icp6_out2')(icp6_reduction2)
 
-        
-        icp7_out0 = Convolution2D(256,1,1,border_mode='same',activation='relu',name='icp7_out0')(icp6_out)
-        
 
-        icp7_out = merge([icp7_out0, icp7_out1, icp7_out2, icp7_out3],mode='concat',concat_axis=3,name='icp7_out')
+    icp6_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp6_pool')(icp5_out)
 
-        
-        
+    icp6_out3 = Convolution2D(64,1,1,border_mode='same',activation='relu',name='icp6_out3')(icp6_pool)
 
 
-        
-        icp8_in = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='icp8_in')(icp7_out)
-        
-        icp8_reduction1 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp8_reduction1')(icp8_in)
+    icp6_out0 = Convolution2D(112,1,1,border_mode='same',activation='relu',name='icp6_out0')(icp5_out)
 
-        icp8_out1 = Convolution2D(320,3,3,border_mode='same',activation='relu',name='icp8_out1')(icp8_reduction1)
 
+    icp6_out = merge([icp6_out0, icp6_out1, icp6_out2, icp6_out3],mode='concat',concat_axis=3,name='icp6_out')
 
-        icp8_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp8_reduction2')(icp8_in)
 
-        icp8_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp8_out2')(icp8_reduction2)
 
 
-        icp8_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp8_pool')(icp8_in)
 
-        icp8_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp8_out3')(icp8_pool)
+    # Moti- Change pool_size -> (2,2)
+    # cls2_pool = AveragePooling2D(pool_size=(5,5),strides=(3,3),border_mode='valid',name='cls2_pool')(icp6_out)
+    cls2_pool = AveragePooling2D(pool_size=(2,2),border_mode='valid',name='cls2_pool')(icp6_out)
+    cls2_reduction_pose = Convolution2D(128,1,1,border_mode='same',activation='relu',name='cls2_reduction_pose')(cls2_pool)
 
-        
-        icp8_out0 = Convolution2D(256,1,1,border_mode='same',activation='relu',name='icp8_out0')(icp8_in)
-        
-        icp8_out = merge([icp8_out0, icp8_out1, icp8_out2, icp8_out3],mode='concat',concat_axis=3,name='icp8_out')
-        
 
+    cls2_fc1_flat = Flatten()(cls2_reduction_pose)
 
+    cls2_fc1 = Dense(1024,activation='relu',name='cls2_fc1')(cls2_fc1_flat)
 
+    cls2_fc_pose_xyz = Dense(xy_nb_outs,name='cls2_fc_pose_xyz')(cls2_fc1)
 
+    cls2_fc_pose_wpqr = Dense(rot_nb_outs, name='cls2_fc_pose_wpqr')(cls2_fc1)
 
-        icp9_reduction1 = Convolution2D(192,1,1,border_mode='same',activation='relu',name='icp9_reduction1')(icp8_out)
 
-        icp9_out1 = Convolution2D(384,3,3,border_mode='same',activation='relu',name='icp9_out1')(icp9_reduction1)
 
 
-        icp9_reduction2 = Convolution2D(48,1,1,border_mode='same',activation='relu',name='icp9_reduction2')(icp8_out)
 
-        icp9_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp9_out2')(icp9_reduction2)
 
+    icp7_reduction1 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp7_reduction1')(icp6_out)
 
-        icp9_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp9_pool')(icp8_out)
+    icp7_out1 = Convolution2D(320,3,3,border_mode='same',activation='relu',name='icp7_out1')(icp7_reduction1)
 
-        icp9_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp9_out3')(icp9_pool)
 
-        
-        icp9_out0 = Convolution2D(384,1,1,border_mode='same',activation='relu',name='icp9_out0')(icp8_out)
-        
-        icp9_out = merge([icp9_out0, icp9_out1, icp9_out2, icp9_out3],mode='concat',concat_axis=3,name='icp9_out')
-        
+    icp7_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp7_reduction2')(icp6_out)
 
+    icp7_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp7_out2')(icp7_reduction2)
 
 
+    icp7_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp7_pool')(icp6_out)
 
-        # Moti- Skip pooling
-        # cls3_pool = AveragePooling2D(pool_size=(7,7),strides=(1,1),border_mode='valid',name='cls3_pool')(icp9_out)
-        cls3_pool = icp9_out
-        cls3_fc1_flat = Flatten()(cls3_pool)
+    icp7_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp7_out3')(icp7_pool)
 
-        cls3_fc1_pose = Dense(2048,activation='relu',name='cls3_fc1_pose')(cls3_fc1_flat)
 
-        
-        cls3_fc_pose_xyz = Dense(xy_nb_outs,name='cls3_fc_pose_xyz')(cls3_fc1_pose)
-        
-        cls3_fc_pose_wpqr = Dense(rot_nb_outs, name='cls3_fc_pose_wpqr')(cls3_fc1_pose)
-        
+    icp7_out0 = Convolution2D(256,1,1,border_mode='same',activation='relu',name='icp7_out0')(icp6_out)
 
 
+    icp7_out = merge([icp7_out0, icp7_out1, icp7_out2, icp7_out3],mode='concat',concat_axis=3,name='icp7_out')
 
 
 
-        posenet = Model(input=input, output=[cls1_fc_pose_xyz, cls1_fc_pose_wpqr,
-                                             cls2_fc_pose_xyz, cls2_fc_pose_wpqr,
-                                             cls3_fc_pose_xyz, cls3_fc_pose_wpqr])
-    
+
+
+
+    icp8_in = MaxPooling2D(pool_size=(3,3),strides=(2,2),border_mode='same',name='icp8_in')(icp7_out)
+
+    icp8_reduction1 = Convolution2D(160,1,1,border_mode='same',activation='relu',name='icp8_reduction1')(icp8_in)
+
+    icp8_out1 = Convolution2D(320,3,3,border_mode='same',activation='relu',name='icp8_out1')(icp8_reduction1)
+
+
+    icp8_reduction2 = Convolution2D(32,1,1,border_mode='same',activation='relu',name='icp8_reduction2')(icp8_in)
+
+    icp8_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp8_out2')(icp8_reduction2)
+
+
+    icp8_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp8_pool')(icp8_in)
+
+    icp8_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp8_out3')(icp8_pool)
+
+
+    icp8_out0 = Convolution2D(256,1,1,border_mode='same',activation='relu',name='icp8_out0')(icp8_in)
+
+    icp8_out = merge([icp8_out0, icp8_out1, icp8_out2, icp8_out3],mode='concat',concat_axis=3,name='icp8_out')
+
+
+
+
+
+
+    icp9_reduction1 = Convolution2D(192,1,1,border_mode='same',activation='relu',name='icp9_reduction1')(icp8_out)
+
+    icp9_out1 = Convolution2D(384,3,3,border_mode='same',activation='relu',name='icp9_out1')(icp9_reduction1)
+
+
+    icp9_reduction2 = Convolution2D(48,1,1,border_mode='same',activation='relu',name='icp9_reduction2')(icp8_out)
+
+    icp9_out2 = Convolution2D(128,5,5,border_mode='same',activation='relu',name='icp9_out2')(icp9_reduction2)
+
+
+    icp9_pool = MaxPooling2D(pool_size=(3,3),strides=(1,1),border_mode='same',name='icp9_pool')(icp8_out)
+
+    icp9_out3 = Convolution2D(128,1,1,border_mode='same',activation='relu',name='icp9_out3')(icp9_pool)
+
+
+    icp9_out0 = Convolution2D(384,1,1,border_mode='same',activation='relu',name='icp9_out0')(icp8_out)
+
+    icp9_out = merge([icp9_out0, icp9_out1, icp9_out2, icp9_out3],mode='concat',concat_axis=3,name='icp9_out')
+
+
+
+
+
+    # Moti- Skip pooling
+    # cls3_pool = AveragePooling2D(pool_size=(7,7),strides=(1,1),border_mode='valid',name='cls3_pool')(icp9_out)
+    cls3_pool = icp9_out
+    cls3_fc1_flat = Flatten()(cls3_pool)
+
+    cls3_fc1_pose = Dense(2048,activation='relu',name='cls3_fc1_pose')(cls3_fc1_flat)
+
+
+    cls3_fc_pose_xyz = Dense(xy_nb_outs,name='cls3_fc_pose_xyz')(cls3_fc1_pose)
+
+    cls3_fc_pose_wpqr = Dense(rot_nb_outs, name='cls3_fc_pose_wpqr')(cls3_fc1_pose)
+
+
+
+
+
+
+    posenet = Model(input=input, output=[cls1_fc_pose_xyz, cls1_fc_pose_wpqr,
+                                         cls2_fc_pose_xyz, cls2_fc_pose_wpqr,
+                                         cls3_fc_pose_xyz, cls3_fc_pose_wpqr])
+
     if tune:
         if weights_path:
             weights_data = np.load(weights_path).item()
@@ -425,11 +425,21 @@ def create_posenet(image_shape=(224, 224, 3), xy_nb_outs=2, rot_nb_outs=2, weigh
     return posenet
 
 
-def posenet_train(image_shape, xy_nb_outs, rot_nb_outs, optimizer=None, loss=None):
+# Train model - GoogLeNet (Trained on Places)
+def posenet_train(image_shape, xy_nb_outs, rot_nb_outs, multi_gpu=False, optimizer=None, loss=None):
     model_name = posenet_train.__name__
 
-    # Train model - GoogLeNet (Trained on Places)
-    model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, rot_nb_outs=rot_nb_outs)
+    # Multi GPU source-
+    # https://keras.io/utils/#multi_gpu_model
+    # For multi GPU-
+    # Instantiate the base model (or "template" model).
+    # We recommend doing this with under a CPU device scope,
+    # so that the model's weights are hosted on CPU memory.
+    # Otherwise they may end up hosted on a GPU, which would
+    # complicate weight sharing.
+    device_str = '/cpu:0' if multi_gpu else '/gpu:1'
+    with tf.device(device_str):
+        model = create_posenet(image_shape=image_shape, xy_nb_outs=xy_nb_outs, rot_nb_outs=rot_nb_outs)
 
     if rot_nb_outs == 2:   # 'angle'
         rot_loss_1 = cyclic_loss_1
@@ -457,6 +467,14 @@ def posenet_train(image_shape, xy_nb_outs, rot_nb_outs, optimizer=None, loss=Non
                 'cls2_fc_pose_xyz': euc_loss2x, 'cls2_fc_pose_wpqr': rot_loss_2,
                 'cls3_fc_pose_xyz': euc_loss3x, 'cls3_fc_pose_wpqr': rot_loss_3}
 
-    model.compile(optimizer=optimizer, loss=loss)
+    if multi_gpu:
+        from keras.utils import multi_gpu_model
 
-    return model, model_name
+        # Replicates the model on 2 GPUs.
+        # This assumes that your machine has 2 available GPUs.
+        parallel_model = multi_gpu_model(model, gpus=2)
+        parallel_model.compile(optimizer=optimizer, loss=loss)
+        return parallel_model, model_name
+    else:
+        model.compile(optimizer=optimizer, loss=loss)
+        return model, model_name

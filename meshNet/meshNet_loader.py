@@ -109,6 +109,21 @@ class ImageProcessor:
         self.x_type = x_type
 
     @staticmethod
+    def _add_random_lines(img, lines_per_image=5):
+        # import cv2
+        import random
+
+        width = img.shape[1]
+        height = img.shape[0]
+
+        for n in xrange(lines_per_image):
+            x1 = random.randint(0, width)
+            y1 = random.randint(0, height)
+            x2 = random.randint(0, width)
+            y2 = random.randint(0, height)
+            cv2.line(img, (x1, y1), (x2, y2), 255)
+
+    @staticmethod
     def _load_face_image(cur_file, image_size, flip=True):
         face_image = load_image(cur_file[:-len('_edges.png')] + '_faces.png', image_size)
         return flip_imgs_colors(face_image) if flip else face_image
@@ -123,14 +138,19 @@ class ImageProcessor:
         return depth_map
 
     def allocate_images(self, img_num, image_size):
-        if self.x_type == 'stacked':
+        if self.x_type == 'depth':
             return np.empty((img_num, image_size[1], image_size[0], 3), dtype=np.float32)
+        elif self.x_type == 'stacked_faces':
+            return np.empty((img_num, image_size[1], image_size[0], 2), dtype=np.float32)
         else:
-            return np.empty(img_num, dtype=np.object)
+            return np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.float32)
 
     def process(self, img, cur_file, label):
         try:
             img = flip_imgs_colors(img)
+
+            # TODO: Comment or add as option
+            # self._add_random_lines(img, lines_per_image=5)
 
             if self.x_type == 'edges':
                 pass
@@ -145,7 +165,13 @@ class ImageProcessor:
                 img = cv2.bitwise_or(img, face_image)
                 # imshow('edges_on_faces', img)
 
-            elif self.x_type == 'stacked':
+            elif self.x_type == 'stacked_faces':
+                img_stack = np.empty((img.shape[0], img.shape[1], 2), dtype=np.float32)
+                img_stack[:, :, 0] = img
+                img_stack[:, :, 1] = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
+                img = img_stack
+
+            elif self.x_type == 'depth':
                 img_stack = np.empty((img.shape[0], img.shape[1], 3), dtype=np.float32)
                 img_stack[:, :, 0] = img
                 img_stack[:, :, 1] = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
@@ -260,16 +286,17 @@ class DataLoader:
         self.y_type = y_type
 
         # y_type is done after cache is loaded so no need to use in prefix
+        save_cache = True
         cache_prefix = "%s" % x_type
         self.x_train, self.labels_train, self.file_urls_train = \
             utils.load_folder(cache_prefix, train_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                              shuffle=True, recursive=True, save_cache=True, skip_upscale=True,
+                              shuffle=True, recursive=True, save_cache=save_cache, skip_upscale=True,
                               labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
 
         if test_dir is not None:
             self.x_test, self.labels_test, self.file_urls_test = \
                 utils.load_folder(cache_prefix, test_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                                  shuffle=True, recursive=True, save_cache=True, skip_upscale=True,
+                                  shuffle=True, recursive=True, save_cache=save_cache, skip_upscale=True,
                                   labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
         else:
             print("Test dir not supplied. Splitting train data...")

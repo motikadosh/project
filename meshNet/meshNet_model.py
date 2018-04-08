@@ -921,6 +921,54 @@ def create_googlenet(weights_path=None):
     return googlenet
 
 
+def meshNet_fc(image_shape, xy_nb_outs, rot_nb_outs, multi_gpu=False, optimizer=None, loss=None):
+    model_name = meshNet_fc.__name__
+
+    if rot_nb_outs != 4:  # Not 'quaternion'
+        raise Exception("Invalid rot_nb_outs len. Currently only quaternion is supported")
+
+    input = Input(shape=image_shape)
+
+    fc_0 = Flatten()(input)
+    fc_1 = Dense(2048, activation='relu', name='fc_1')(fc_0)
+    fc_2 = Dense(1024, activation='relu', name='fc_2')(fc_1)
+    fc_last = Dense(512, activation='relu', name='fc_last')(fc_2)
+
+    xyz_out = Dense(xy_nb_outs, name='xyz_out')(fc_last)
+    rot_out = Dense(rot_nb_outs, name='rot_out')(fc_last)
+
+    model = Model(inputs=input, outputs=[xyz_out, rot_out])
+
+    if optimizer is None:
+        optimizer = Adadelta()
+        # optimizer = Adam(lr=0.001)
+    if loss is None:
+        loss = {'xyz_out': euc_loss_x, 'rot_out': euc_loss_q}
+
+    if multi_gpu:
+        from keras.utils import multi_gpu_model
+
+        # Replicates the model on 2 GPUs.
+        # This assumes that your machine has 2 available GPUs.
+        parallel_model = multi_gpu_model(model, gpus=2)
+        parallel_model.compile(optimizer=optimizer, loss=loss)
+        return parallel_model, model_name
+    else:
+        model.compile(optimizer=optimizer, loss=loss)
+        return model, model_name
+
+
+#
+# *** Loss functions ***
+#
+def euc_loss_x(y_true, y_pred):
+    return K.sqrt(K.sum(K.square(y_true[:, :] - y_pred[:, :]), axis=1, keepdims=True))
+
+
+def euc_loss_q(y_true, y_pred):
+    return K.sqrt(K.sum(K.square(y_true[:, :] - y_pred[:, :]), axis=1, keepdims=True))
+
+
 def main():
     print("Entered")
 
