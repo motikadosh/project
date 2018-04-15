@@ -74,13 +74,14 @@ DEFINE_int32(sample_pitch_range, -15, "Range of angles for pitch sampling");
 DEFINE_int32(sample_pitch_step, -3, "Step size for pitch sampling");
 
 DEFINE_bool(random_sampling, false, "Use random sampling or not");
-DEFINE_int32(samples_num, 300, "Number of (x, y) pts to sample in auto navigation");
-DEFINE_double(test_percent, 0.2, "Test percent");
+DEFINE_int32(random_samples_num, 300, "Number of (x, y) pts to sample in random sampling");
+DEFINE_double(random_test_percent, 0.2, "Test percent in random sampling");
 DEFINE_double(grid_step, 20.0, "Step size between each two (x, y) pts in 3D model units");
 DEFINE_double(grid_test_offset, 0.5, "Offset in grid step from main grid to secondary grid");
 DEFINE_double(camera_height, 2, "Camera height added to ground-level. I.e. Z of samples");
 DEFINE_bool(sample_pos_only, false, "No angle (yaw/pitch) sampling is made - for debugging");
 DEFINE_string(sample_rect, "", "Rect in map dimensions to perform sampling. Format: \"x y width height\"");
+DEFINE_string(world_sample_rect, "", "Rect in world dimensions to perform all angles sampling");
 DEFINE_string(sample_angle_only, "", "Single x,y in map dimensions to perform all angles sampling");
 DEFINE_bool(sample_depth, true, "When true - Saves also depth maps in .exr format");
 
@@ -3186,8 +3187,20 @@ void populateXfVector()
         xMax += height / 20;
     }
 
-    if (!FLAGS_sample_rect.empty())
+    if (!FLAGS_world_sample_rect.empty())
     {
+        DBG("Using world sample rect");
+        cv::Rect worldSampleRect = parseRectStr(FLAGS_world_sample_rect);
+
+        xMin = worldSampleRect.x;
+        xMax = worldSampleRect.br().x;
+        yMin = worldSampleRect.y;
+        yMax = worldSampleRect.br().y;
+    }
+    else if (!FLAGS_sample_rect.empty())
+    {
+        DBG("Using map sample rect");
+
         cv::Point3f worldTL = gOrthoProjData.convertMapPointToWorld(gSamplesROI.tl(), gModelMap.size());
         cv::Point3f worldBR = gOrthoProjData.convertMapPointToWorld(gSamplesROI.br(), gModelMap.size());
 
@@ -3221,14 +3234,14 @@ void populateXfVector()
             std::uniform_real_distribution<> disY(yMin, yMax);
 
             // Generate test random points
-            while (gDataSet["test"].samplePoints.size() < FLAGS_samples_num * FLAGS_test_percent)
+            while (gDataSet["test"].samplePoints.size() < FLAGS_random_samples_num * FLAGS_random_test_percent)
             {
                 cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
                 checkPointAndSetZ(newPoint, gDataSet["test"].samplePoints, gSamplesMap, blue, orange);
             }
 
             // Generate train random points
-            while (gDataSet["train"].samplePoints.size() < FLAGS_samples_num * (1 - FLAGS_test_percent))
+            while (gDataSet["train"].samplePoints.size() < FLAGS_random_samples_num * (1 - FLAGS_random_test_percent))
             {
                 cv::Point3f newPoint(disX(gen), disY(gen), groundZ);
                 checkPointAndSetZ(newPoint, gDataSet["train"].samplePoints, gSamplesMap, green, red);
@@ -3240,9 +3253,9 @@ void populateXfVector()
             float stepY = FLAGS_grid_step;
             DBG("stepX [" << stepX << "], stepY [" << stepY << "]");
 
-            for (float x = xMin; x < xMax; x += stepX)
+            for (float x = xMin; x <= xMax; x += stepX)
             {
-                for (float y = yMin; y < yMax; y += stepY)
+                for (float y = yMin; y <= yMax; y += stepY)
                 {
                     checkPointAndSetZ(cv::Point3f(x, y, groundZ), gDataSet["train"].samplePoints, gSamplesMap, green,
                         red);
