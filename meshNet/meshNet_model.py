@@ -921,23 +921,40 @@ def create_googlenet(weights_path=None):
     return googlenet
 
 
+def fc1(img_input):
+    fc_0 = Flatten()(img_input)
+    fc_1 = Dense(2048, activation='relu', name='fc_1')(fc_0)
+    fc_2 = Dense(1024, activation='relu', name='fc_2')(fc_1)
+    fc_last = Dense(512, activation='relu', name='fc_last')(fc_2)
+    return fc_last
+
+
+def fc2(img_input):
+    x = Flatten()(img_input)
+    x = Dense(2048, name='fc_1')(x)
+    x = PReLU()(x)
+    x = Dense(1024, name='fc_2')(x)
+    x = PReLU()(x)
+    x = Dense(512, name='fc_last')(x)
+    fc_last = PReLU()(x)
+    return fc_last
+
+
 def meshNet_fc(image_shape, xy_nb_outs, rot_nb_outs, multi_gpu=False, optimizer=None, loss=None):
     model_name = meshNet_fc.__name__
 
     if rot_nb_outs != 4:  # Not 'quaternion'
         raise Exception("Invalid rot_nb_outs len. Currently only quaternion is supported")
 
-    input = Input(shape=image_shape)
+    img_input = Input(shape=image_shape)
 
-    fc_0 = Flatten()(input)
-    fc_1 = Dense(2048, activation='relu', name='fc_1')(fc_0)
-    fc_2 = Dense(1024, activation='relu', name='fc_2')(fc_1)
-    fc_last = Dense(512, activation='relu', name='fc_last')(fc_2)
+    # fc_last = fc1(img_input)
+    fc_last = fc2(img_input)
 
     xyz_out = Dense(xy_nb_outs, name='xyz_out')(fc_last)
     rot_out = Dense(rot_nb_outs, name='rot_out')(fc_last)
 
-    model = Model(inputs=input, outputs=[xyz_out, rot_out])
+    model = Model(inputs=img_input, outputs=[xyz_out, rot_out])
 
     if optimizer is None:
         optimizer = Adadelta()
