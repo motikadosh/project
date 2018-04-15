@@ -300,21 +300,21 @@ def main():
                                                  [loader.y_test[:, :2], loader.y_test[:, 2:],
                                                   loader.y_test[:, :2], loader.y_test[:, 2:],
                                                   loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
+                                shuffle=True, initial_epoch=initial_epoch, verbose=2)
         elif model_type == 'resnet':
             history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
                                 batch_size=batch_size, epochs=epochs, callbacks=callbacks,
                                 validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
+                                shuffle=True, initial_epoch=initial_epoch, verbose=2)
         elif model_type == 'fc':
             history = model.fit(loader.x_train, [loader.y_train[:, :2], loader.y_train[:, 2:]],
                                 batch_size=batch_size, epochs=epochs, callbacks=callbacks,
                                 validation_data=(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]]),
-                                shuffle=True, initial_epoch=initial_epoch)
+                                shuffle=True, initial_epoch=initial_epoch, verbose=2)
         else:
             # history = model.fit(loader.x_train, loader.y_train, batch_size=batch_size, epochs=epochs,
             #                     callbacks=callbacks, validation_data=(loader.x_test, loader.y_test), shuffle=True,
-            #                     initial_epoch=initial_epoch)
+            #                     initial_epoch=initial_epoch, verbose=2)
             raise ValueError("Unsupported model type:", model_type)
 
         meshNet_model.load_best_weights(model, sess_info)
@@ -344,9 +344,6 @@ def main():
     # if not test_only:
     #     loader.save_pickle(sess_info)
 
-    if history:
-        visualize.visualize_history(history, sess_info, render_to_screen)
-
     if model_type == 'posenet':
         # TODO: Choose best output according to test_score
         # detailed_evaluation(model, loader, 1)
@@ -358,6 +355,9 @@ def main():
         detailed_evaluation(model, loader, 1)
     else:
         raise ValueError("Unsupported model type:", model_type)
+
+    if history:
+        visualize.visualize_history(history, sess_info, render_to_screen)
 
     print("Done")
 
