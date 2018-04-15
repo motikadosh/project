@@ -94,6 +94,8 @@ def save_pickle(sess_info, data):
 
 
 def get_files_with_ext(base_dir, ext_list=None, recursive=True, abs_path=False, sort=False, warn_empty=True):
+    base_dir = base_dir.rstrip(os.sep)
+
     if ext_list is None:
         ext_list = ('.jpg', '.jpeg', '.gif', '.png')
 
@@ -224,6 +226,9 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
                         img = process_image_fn.process(img, cur_file, label)
                         if img is None:
                             continue
+
+                    if len(img.shape) == 2:
+                        img = np.expand_dims(img, axis=-1)
 
                     x[cnt, :, :, :] = img
 
