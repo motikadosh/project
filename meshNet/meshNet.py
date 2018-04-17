@@ -198,7 +198,7 @@ elif debug_level == 1:  # Medium Debug
     epochs = 2
 elif debug_level == 2:  # Full Debug
     part_of_data = 100
-    epochs = 2
+    epochs = 1
 else:
     raise Exception("Invalid debug level " + str(debug_level))
 
@@ -328,7 +328,7 @@ def main():
             #                     initial_epoch=initial_epoch, verbose=2)
             raise ValueError("Unsupported model type:", model_type)
 
-            weights_filename = meshNet_model.load_best_weights(model, sess_info)
+        weights_filename = meshNet_model.load_best_weights(model, sess_info)
     else:
         history = None
 
@@ -426,36 +426,35 @@ def inverse_transform(loader, normalized, y_train_pred, y_test_pred):
 def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test):
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
 
-    hist_fname = sess_info.title + '_predictions_err_hist.png'
-    train_2d_hist_fname = sess_info.title + '_predictions_err_2d_hist.png'
-
     max_xy_error = max(np.max(xy_error_test), np.max(xy_error_train))
 
     try:
         # Plot 2d heatmap histograms of the errors
+        train_2d_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_err_2d_hist.png')
         visualize.multiple_plots(1, 1, 2, 1)
         visualize.plot_2d_hist(xy_error_test, angle_error_test, False, (50, 50), title='Test Err 2D Histogram',
                                xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180], show=False)
         visualize.multiple_plots(1, 1, 2, 2)
         visualize.plot_2d_hist(xy_error_train, angle_error_train, False, (50, 50), title='Train Err 2D Histogram',
                                xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180],
-                               show=render_to_screen, save_path=os.path.join(plots_dir, train_2d_hist_fname))
+                               show=render_to_screen, save_path=train_2d_hist_fname)
 
         # Plot 1D histograms of the errors
-        visualize.multiple_plots(2, 2, 2, 1)
+        xy_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_xy_err_hist.png')
+        visualize.multiple_plots(2, 1, 2, 1)
         visualize.plot_hist(xy_error_train, False, 50, title='Train XY err(%s-samples)' % len(xy_error_train),
                             ylabel='Samples', show=False)
-        visualize.multiple_plots(2, 2, 2, 2)
+        visualize.multiple_plots(2, 1, 2, 2)
         visualize.plot_hist(xy_error_test, False, 50, title='Test XY err(%s-samples)' % len(xy_error_test),
-                            ylabel='Samples', show=False)
+                            ylabel='Samples', show=render_to_screen, save_path=xy_hist_fname)
 
-        visualize.multiple_plots(2, 2, 2, 3)
+        angle_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_angle_err_hist.png')
+        visualize.multiple_plots(3, 1, 2, 1)
         visualize.plot_hist(angle_error_train, False, 50, title='Train angle err(%s-samples)' %
                             len(angle_error_train), ylabel='Samples', show=False)
-        visualize.multiple_plots(2, 2, 2, 4)
+        visualize.multiple_plots(3, 1, 2, 2)
         visualize.plot_hist(angle_error_test, False, 50, title='Test angle err(%s-samples)' %
-                            len(angle_error_test), ylabel='Samples', show=render_to_screen,
-                            save_path=os.path.join(plots_dir, hist_fname))
+                            len(angle_error_test), ylabel='Samples', show=render_to_screen, save_path=angle_hist_fname)
     except Exception as e:
         print("Warning: {}".format(e))
 
