@@ -3548,9 +3548,12 @@ void autoNavigate()
 
     if (FLAGS_debug || gAutoNavigationIdx % 1000 == 0)
     {
-        DBG("sample [#" << gAutoNavigationIdx << "/" << samplesData.size() << "], dataSet [" <<
-            (sIsTrain ? "Train" : "Test") << "], sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum <<
-            "], samplesData [" << samplesData[gAutoNavigationIdx] << "]");
+        DBG("sample [#" << gAutoNavigationIdx << "/" <<
+            (FLAGS_export_third ? int(FLAGS_export_third * samplesData.size() / 3) : int(samplesData.size())) << "]" <<
+            ", dataSet [" << (sIsTrain ? "Train" : "Test") << "]" <<
+            (FLAGS_export_third ? ", third [" + std::to_string(FLAGS_export_third) + "]" : "") <<
+            ", sExportsNum [" << sExportsNum << "], sSkipsNum [" << sSkipsNum << "]" <<
+            ", samplesData [" << samplesData[gAutoNavigationIdx] << "]");
     }
 
     if (FLAGS_export_third && gAutoNavigationIdx == int(FLAGS_export_third * samplesData.size() / 3))
