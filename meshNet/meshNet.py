@@ -11,6 +11,7 @@ if not multi_gpu:
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import numpy as np
+np.set_printoptions(precision=4, suppress=True)
 
 # Freeze seed - Must be called before import of Keras!
 seed = 12345
@@ -57,6 +58,9 @@ data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_Grid
 train_dir = os.path.join(data_dir, 'train')
 # test_dir = None
 test_dir = os.path.join(data_dir, 'test')
+
+mesh_name = 'berlin'
+grid_step = 20
 
 roi = (4400, 5500, 800, 800)
 # roi = (5000, 3000, 800, 800)
@@ -161,19 +165,24 @@ weights_filename = os.path.join(model_sessions_outputs,
 
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'depth'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = 'stacked_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
+use_cache = False
 use_pickle = False
 render_to_screen = False
 evaluate = True
 load_weights = False
 initial_epoch = 0  # Should have the weights Epoch number + 1
+mess = False
 
 test_only = False
 if test_only:
     load_weights = True
     evaluate = False
+
+if initial_epoch != 0:
+    load_weights = True
 
 # Training options
 batch_size = 32
@@ -195,14 +204,14 @@ else:
 
 
 # Script config
-title = "meshNet"
-sess_info = utils.SessionInfo(title, postfix='_Test' if test_only else '_Train')
+sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights,
+                                           x_type, y_type, mess)
 
 
 # TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
 def main():
     logger.Logger(sess_info)
-    print("Entered %s" % title)
+    print("Entered %s" % sess_info.title)
 
     if load_weights and use_pickle:
         # pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
@@ -217,13 +226,15 @@ def main():
                     x_range=(0, 1),
                     x_type=x_type,
                     y_type=y_type,
-                    part_of_data=part_of_data)
+                    part_of_data=part_of_data,
+                    use_cache=use_cache)
 
-    # print("Creating a mess - x_train shuffle")
-    # np.random.shuffle(loader.x_train)
-    #  print("Minimal test size (100 samples) - Test will mean nothing")
-    #   loader.x_test = loader.x_test[:100]
-    #   loader.y_test = loader.y_test[:100]
+    if mess:
+        print("Creating a MESS - x_train shuffle")
+        np.random.shuffle(loader.x_train)
+        print("Minimal test size (100 samples) - Test will mean nothing")
+        loader.x_test = loader.x_test[:100]
+        loader.y_test = loader.y_test[:100]
 
     # visualize.show_data(loader.x_train, bg_color=(0, 255, 0))
 
@@ -317,7 +328,7 @@ def main():
             #                     initial_epoch=initial_epoch, verbose=2)
             raise ValueError("Unsupported model type:", model_type)
 
-        meshNet_model.load_best_weights(model, sess_info)
+            weights_filename = meshNet_model.load_best_weights(model, sess_info)
     else:
         history = None
 
@@ -386,62 +397,35 @@ def print_results(y, y_pred, file_urls, xy_error):
         print ("")
 
 
-def calc_stats(loader, y, y_pred, normalized=False, dataset_name='dataset'):
-    if not normalized:
-        y = loader.y_inverse_transform(y)
-        y_pred = loader.y_inverse_transform(y_pred)
-
+def calc_stats(y_true, y_pred, normalized=False, dataset_name='dataset'):
     print("%s errors..." % dataset_name)
-    xy_error = utils.xy_dist(y[:, :2], y_pred[:, :2])
+    xy_error = utils.xy_dist(y_true[:, :2], y_pred[:, :2])
     print("%s xy error. Mean %s, median %s, std %s" % (dataset_name, np.mean(xy_error), np.median(xy_error),
                                                        np.std(xy_error)))
-    angle_error = utils.rotation_error(y[:, 2:], y_pred[:, 2:], normalized=normalized)
+    angle_error = utils.rotation_error(y_true[:, 2:], y_pred[:, 2:], normalized=normalized)
     print("%s angle error. Mean %s, median %s, std %s" % (dataset_name, np.mean(angle_error), np.median(angle_error),
                                                           np.std(angle_error)))
 
     return xy_error, angle_error
 
 
-# visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
-def detailed_evaluation(model, loader, output_number):
-    """ output_number: PoseNet has total of 6 outputs. 3 pairs of [xy_out, rot_out]
-                       ResNet/FC has single output pair [xy_out, rot_out]
-    """
-    print("detailed evaluation...")
+def inverse_transform(loader, normalized, y_train_pred, y_test_pred):
+    if not normalized:
+        y_train_true = loader.y_inverse_transform(loader.y_train)
+        y_train_pred = loader.y_inverse_transform(y_train_pred)
 
-    print("Predicting train set...")
-    y_train_pred = predict(model, loader.x_train)
-    print("Predicting test set...")
-    y_test_pred = predict(model, loader.x_test)
+        y_test_true = loader.y_inverse_transform(loader.y_test)
+        y_test_pred = loader.y_inverse_transform(y_test_pred)
+    else:
+        y_train_true = loader.y_train
+        y_test_true = loader.y_test
 
-    # print("Sanity - Should have identical result to the network loss...")
-    # l2_train_loss = calc_loss(loader.y_test, y_test_pred)
-    # print("Train l2 loss", l2_train_loss)
-    # l2_test_loss = calc_loss(loader.y_test, y_test_pred)
-    # print("Test l2 loss", l2_test_loss)
+    return y_train_true, y_train_pred, y_test_true, y_test_pred
 
-    print("Using output number:", output_number)
-    xyz_output = (output_number - 1) * 2
-    rotation_output = xyz_output + 1
-    y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[rotation_output]), axis=-1)
-    y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[rotation_output]), axis=-1)
 
-    xy_error_train, angle_error_train = calc_stats(loader, loader.y_train, y_train_pred, normalized=False,
-                                                   dataset_name='Train')
-    xy_error_test, angle_error_test = calc_stats(loader, loader.y_test, y_test_pred, normalized=False,
-                                                 dataset_name='Test')
-
-    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
-    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='angle', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
-    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='comb', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
-
+def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test):
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
+
     hist_fname = sess_info.title + '_predictions_err_hist.png'
     train_2d_hist_fname = sess_info.title + '_predictions_err_2d_hist.png'
 
@@ -474,6 +458,82 @@ def detailed_evaluation(model, loader, output_number):
                             save_path=os.path.join(plots_dir, hist_fname))
     except Exception as e:
         print("Warning: {}".format(e))
+
+
+# visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)
+def detailed_evaluation(model, loader, output_number):
+    """ output_number: PoseNet has total of 6 outputs. 3 pairs of [xy_out, rot_out]
+                       ResNet/FC has single output pair [xy_out, rot_out]
+    """
+    print("detailed evaluation...")
+
+    print("Predicting train set...")
+    y_train_pred = predict(model, loader.x_train)
+    print("Predicting test set...")
+    y_test_pred = predict(model, loader.x_test)
+
+    # print("Sanity - Should have identical result to the network loss...")
+    # l2_train_loss = calc_loss(loader.y_test, y_test_pred)
+    # print("Train l2 loss", l2_train_loss)
+    # l2_test_loss = calc_loss(loader.y_test, y_test_pred)
+    # print("Test l2 loss", l2_test_loss)
+
+    print("Using output number:", output_number)
+    xyz_output = (output_number - 1) * 2
+    rotation_output = xyz_output + 1
+    y_train_pred = np.concatenate((y_train_pred[xyz_output], y_train_pred[rotation_output]), axis=-1)
+    y_test_pred = np.concatenate((y_test_pred[xyz_output], y_test_pred[rotation_output]), axis=-1)
+
+    normalized = False
+    print("Normalized:", normalized)
+    y_train_true, y_train_pred, y_test_true, y_test_pred = inverse_transform(loader, normalized, y_train_pred, y_test_pred)
+
+    xy_error_train, angle_error_train = calc_stats(y_train_true, y_train_pred, normalized=normalized,
+                                                   dataset_name='Train')
+    xy_error_test, angle_error_test = calc_stats(y_test_true, y_test_pred, normalized=normalized, dataset_name='Test')
+
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='angle', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
+    # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='comb', idx=i, is_train=True,
+    #                               normalized=False, asc=False, figure_num=i)
+
+    data = {
+        "model_type": model_type,
+        "weights_filename": weights_filename,
+        "x_type": x_type,
+        "y_type": y_type,
+        "train_dir": train_dir,
+        "test_dir": test_dir,
+        "image_size": loader.image_size,
+
+        "test_only": test_only,
+        "mesh_name": mesh_name,
+        "roi": roi,
+        "grid_step": grid_step,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "part_of_data": part_of_data,
+
+        "file_urls_train": loader.file_urls_train,
+        "y_train_true": y_train_true,
+        "y_train_pred": y_train_pred,
+        "xy_error_train": xy_error_train,
+        "angle_error_train": angle_error_train,
+
+        "file_urls_test": loader.file_urls_test,
+        "y_test_true": y_test_true,
+        "y_test_pred": y_test_pred,
+        "xy_error_test": xy_error_test,
+        "angle_error_test": angle_error_test,
+    }
+    utils.save_pickle(sess_info, data)
+
+    errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test)
 
 
 if __name__ == '__main__':

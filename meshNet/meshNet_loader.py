@@ -263,7 +263,7 @@ class DataLoader:
         self.y_type = None
 
     def load(self, train_dir, test_dir=None, image_size=IMAGE_SIZE, x_range=(0, 1), y_range=(0, 1),
-             x_type='edges', y_type='angle', part_of_data=1.0):
+             x_type='edges', y_type='angle', part_of_data=1.0, use_cache=True):
 
         if x_type == 'depth':
             print("Setting x_range=None since x_type=='depth' - Depth is not in image range [0, 255]")
@@ -286,17 +286,16 @@ class DataLoader:
         self.y_type = y_type
 
         # y_type is done after cache is loaded so no need to use in prefix
-        save_cache = True
         cache_prefix = "%s" % x_type
         self.x_train, self.labels_train, self.file_urls_train = \
             utils.load_folder(cache_prefix, train_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                              shuffle=True, recursive=True, save_cache=save_cache, skip_upscale=True,
+                              shuffle=True, recursive=True, save_cache=use_cache, skip_upscale=True,
                               labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
 
         if test_dir is not None:
             self.x_test, self.labels_test, self.file_urls_test = \
                 utils.load_folder(cache_prefix, test_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                                  shuffle=True, recursive=True, save_cache=save_cache, skip_upscale=True,
+                                  shuffle=True, recursive=True, save_cache=use_cache, skip_upscale=True,
                                   labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
         else:
             print("Test dir not supplied. Splitting train data...")

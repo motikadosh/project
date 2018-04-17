@@ -23,12 +23,24 @@ def get_timestamp():
 
 
 class SessionInfo:
-    def __init__(self, title, out_dir=None, postfix=None):
+    def __init__(self, title, out_dir=None, suffix=None):
         self.title = title
 
         self.out_dir = (self.title + '_' + get_timestamp()) if out_dir is None else out_dir
-        if postfix is not None:
-            self.out_dir += postfix
+        if suffix is not None:
+            self.out_dir += suffix
+
+
+def get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights, x_type, y_type,
+                             mess):
+    title = "meshNet"
+
+    suffix = "_%s%s_%s_%sEpochs_%s_ROI_%s_%s_%s_%s_GridStep%s_%s_%s%s" % \
+             ('Test' if test_only else 'Train', 'Resume' if load_weights else '', model_type, epochs, mesh_name,
+              roi[0], roi[1], roi[2], roi[3], grid_step, y_type, x_type, '_MESS' if mess else '')
+
+    sess_info = SessionInfo(title, suffix=suffix)
+    return sess_info
 
 
 def mkdirs(full_path):

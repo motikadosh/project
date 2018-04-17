@@ -40,6 +40,8 @@ def load_best_weights(model, sess_info):
     print("Loading best weights: " + weights_full_path)
     load_model_weights(model, weights_full_path)
 
+    return weights_full_path
+
 
 # Some modifications to Keras ModelCheckpoint, currently mainly to save disk space
 class myModelCheckpoint(Callback):
@@ -922,6 +924,8 @@ def create_googlenet(weights_path=None):
 
 
 def fc1(img_input):
+    print("Using FC1")
+
     fc_0 = Flatten()(img_input)
     fc_1 = Dense(2048, activation='relu', name='fc_1')(fc_0)
     fc_2 = Dense(1024, activation='relu', name='fc_2')(fc_1)
@@ -930,6 +934,8 @@ def fc1(img_input):
 
 
 def fc2(img_input):
+    print("Using FC2")
+
     x = Flatten()(img_input)
     x = Dense(2048, name='fc_1')(x)
     x = PReLU()(x)
