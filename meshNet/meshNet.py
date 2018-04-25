@@ -28,11 +28,12 @@ import consts
 # Not used in code, for easier interactive debugging
 # import matplotlib.pyplot as plt
 
-data_sessions_outputs = '/home/moti/cg/project/sessions_outputs'
-# data_sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
-
-model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
-# model_sessions_outputs = '/mnt/SSD1/moti/project/meshNet/sessions_outputs'
+if os.path.expanduser('~') == '/home/moti':
+    data_sessions_outputs = '/home/moti/cg/project/sessions_outputs'
+    model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
+else:
+    data_sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
+    model_sessions_outputs = '/mnt/SSD1/moti/project/meshNet/sessions_outputs'
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
