@@ -155,6 +155,9 @@ class ImageProcessor:
             if self.x_type == 'edges':
                 pass
 
+            elif self.x_type == 'faces':
+                img = self._load_face_image(cur_file, utils.get_image_size(img), flip=True)
+
             elif self.x_type == 'gauss_blur_15':
                 img = apply_smoothing(img, 15)
                 face_image = self._load_face_image(cur_file, utils.get_image_size(img))

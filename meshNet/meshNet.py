@@ -166,7 +166,7 @@ weights_filename = os.path.join(model_sessions_outputs,
 
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'stacked_faces'  # 'edges', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = 'stacked_faces'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_cache = False
