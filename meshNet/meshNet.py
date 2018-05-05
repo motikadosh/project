@@ -329,46 +329,57 @@ def main():
             #                     initial_epoch=initial_epoch, verbose=2)
             raise ValueError("Unsupported model type:", model_type)
 
-        weights_filename = meshNet_model.load_best_weights(model, sess_info)
     else:
         history = None
 
-    if evaluate:
-        print("Evaluating model. Test shape", loader.y_test.shape)
+    if not test_only:
+        hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
+        weights_list = os.listdir(hdf5_dir)
+    else:
+        weights_list = ["dummy"]
+
+    for weights_fname in weights_list:
+        if not test_only:
+            weights_full_path = os.path.join(hdf5_dir, weights_fname)
+            meshNet_model.load_model_weights(model, weights_full_path)
+
+        if evaluate:
+            print("Evaluating model. Test shape", loader.y_test.shape)
+            if model_type == 'posenet':
+                test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
+                                             loader.y_test[:, :2], loader.y_test[:, 2:],
+                                             loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size,
+                                             verbose=0)
+            elif model_type == 'resnet':
+                test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                             batch_size=batch_size, verbose=0)
+            elif model_type == 'fc':
+                test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
+                                             batch_size=batch_size, verbose=0)
+            else:
+                # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
+                raise ValueError("Unsupported model type:", model_type)
+
+            print('Evaluate results:')
+            for i, metric in enumerate(model.metrics_names):
+                print(metric, ":", test_scores[i])
+
+        # if not test_only:
+        #     loader.save_pickle(sess_info)
+
         if model_type == 'posenet':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
-                                         loader.y_test[:, :2], loader.y_test[:, 2:],
-                                         loader.y_test[:, :2], loader.y_test[:, 2:]], batch_size=batch_size, verbose=0)
+            # TODO: Choose best output according to test_score
+            # detailed_evaluation(model, loader, 1)
+            # detailed_evaluation(model, loader, 2)
+            detailed_evaluation(model, loader, 3)
         elif model_type == 'resnet':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
-                                         batch_size=batch_size, verbose=0)
+            detailed_evaluation(model, loader, 1)
         elif model_type == 'fc':
-            test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:]],
-                                         batch_size=batch_size, verbose=0)
+            detailed_evaluation(model, loader, 1)
         else:
-            # test_score = model.evaluate(loader.x_test, loader.y_test, batch_size=batch_size, verbose=0)
             raise ValueError("Unsupported model type:", model_type)
 
-        print('Evaluate results:')
-        for i, metric in enumerate(model.metrics_names):
-            print(metric, ":", test_scores[i])
-
-    # if not test_only:
-    #     loader.save_pickle(sess_info)
-
-    if model_type == 'posenet':
-        # TODO: Choose best output according to test_score
-        # detailed_evaluation(model, loader, 1)
-        # detailed_evaluation(model, loader, 2)
-        detailed_evaluation(model, loader, 3)
-    elif model_type == 'resnet':
-        detailed_evaluation(model, loader, 1)
-    elif model_type == 'fc':
-        detailed_evaluation(model, loader, 1)
-    else:
-        raise ValueError("Unsupported model type:", model_type)
-
-    if history:
+    if history is not None:
         visualize.visualize_history(history, sess_info, render_to_screen)
 
     print("Done")
