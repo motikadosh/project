@@ -43,13 +43,13 @@ else:
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200_FullImage')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_40')
-# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_10_train')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep_10')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_4800_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_400_400_GridStep_10')
-data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
-# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep10_depth_train')
-# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep20_depth_train')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep10_depth')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep20_depth')
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_many_angels_few_xys/-1520.15_1422.77/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_onlyPos_grid50/')
@@ -340,8 +340,8 @@ def main():
 
     for weights_fname in weights_list:
         if not test_only:
-            weights_full_path = os.path.join(hdf5_dir, weights_fname)
-            meshNet_model.load_model_weights(model, weights_full_path)
+            weights_filename = os.path.join(hdf5_dir, weights_fname)
+            meshNet_model.load_model_weights(model, weights_filename)
 
         if evaluate:
             print("Evaluating model. Test shape", loader.y_test.shape)
@@ -542,7 +542,9 @@ def detailed_evaluation(model, loader, output_number):
         "xy_error_test": xy_error_test,
         "angle_error_test": angle_error_test,
     }
-    utils.save_pickle(sess_info, data)
+
+    pickle_title = os.path.basename(os.path.splitext(weights_filename)[0])
+    utils.save_pickle(sess_info, data, pickle_title)
 
     errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test)
 

@@ -93,11 +93,11 @@ def load_pickle(pickle_full_path):
         return data
 
 
-def save_pickle(sess_info, data):
+def save_pickle(sess_info, data, title):
     pickle_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'pickle')
     mkdirs(pickle_dir)
 
-    pickle_fname = '{sess_title}.pkl'.format(sess_title=sess_info.title)
+    pickle_fname = '{sess_title}_{title}.pkl'.format(sess_title=sess_info.title, title=title)
     pickle_full_path = os.path.join(pickle_dir, pickle_fname)
 
     with open(pickle_full_path, "wb") as f:
