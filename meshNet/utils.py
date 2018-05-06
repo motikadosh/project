@@ -6,6 +6,7 @@ import errno
 import pickle
 import shutil
 import random
+import time
 
 from contextlib import contextmanager
 from datetime import datetime
@@ -14,6 +15,7 @@ import numpy as np
 from pyquaternion import Quaternion
 import cv2
 from tqdm import tqdm
+from scipy import spatial
 
 import consts
 
@@ -93,11 +95,11 @@ def load_pickle(pickle_full_path):
         return data
 
 
-def save_pickle(sess_info, data, title):
+def save_pickle(sess_info, data, title=None):
     pickle_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'pickle')
     mkdirs(pickle_dir)
 
-    pickle_fname = '{sess_title}_{title}.pkl'.format(sess_title=sess_info.title, title=title)
+    pickle_fname = '{title}.pkl'.format(title=title if title is not None else sess_info.title)
     pickle_full_path = os.path.join(pickle_dir, pickle_fname)
 
     with open(pickle_full_path, "wb") as f:
@@ -388,3 +390,114 @@ def rotation_error(y, y_pred, normalized=False):
         pass
     else:
         raise Exception("Unknown y shape:", y.shape)
+
+
+def calc_nearest_neighbors_hist(y_true, y_pred, k=5):
+
+    def nearest_neighbour(y_true, y_pred, k=5):
+        tree = spatial.cKDTree(y_true)
+        return tree.query(y_pred, k)
+
+    print("Nearest neighbors:", k)
+    print("y_true size:", y_true.shape[0])
+    print("y_pred size:", y_pred.shape[0])
+
+    start_time = time.time()
+    nn = nearest_neighbour(y_true, y_pred, k)
+    end_time = time.time()
+    # print("Nearest_neighbour ", nn)
+    print("Nearest_neighbour took {:.3f} seconds".format(end_time - start_time))
+
+    hist = np.zeros(k, dtype=np.int)
+    tail_size = 0
+    for i in range(len(nn[1])):
+        found = False
+        for j in range(len(nn[1][i])):
+            if i == nn[1][i][j]:
+                hist[j] += 1
+                found = True
+                break
+
+        if not found:
+            tail_size += 1
+
+    print("Hist:", hist)
+    print("Hist sum:", np.sum(hist))
+    print("Tail_size:", tail_size)
+    return hist, tail_size
+
+
+def hist_avg(hist, hist_base=1):
+    """hist_base would be normally 1/0"""
+
+    avg = 0
+    for i in range(len(hist)):
+        avg += hist[i] * (i + hist_base)
+    avg /= float(sum(hist))
+    return avg
+
+
+def mess_result(y_true, y_pred):
+    print("mess_result - random position data")
+
+    k = 1
+    hist, tail_size = calc_nearest_neighbors_hist(y_true, y_pred, k)
+    print("Tail has %d samples for k=%d" % (tail_size, k))
+
+    nn_ratio = hist / float(len(y_pred))
+    print("MESS nn_ratio:", nn_ratio[:10])
+
+
+def train_result(y_true, y_pred, k=5):
+    print("train_result")
+
+    hist, tail_size = calc_nearest_neighbors_hist(y_true, y_pred, k)
+    print("Tail has %d samples for k=%d" % (tail_size, k))
+    avg_knn = hist_avg(hist, 1)
+    print("avg_nn:", avg_knn)
+
+    nn_ratio = hist / float(len(y_pred))
+    print("nn_ratio:", nn_ratio[:10])
+
+
+def test_result(y_true, y_pred, xy_step, k=100):
+    print("test_result")
+
+    yaw_step = 5
+    pitch_step = 3
+
+    # manhattan_distance = manhattan_distance(y_test_true, y_test_pred, step)
+    x_manhattan_distance = abs(y_true[:, 0] - y_pred[:, 0]) // xy_step
+    y_manhattan_distance = abs(y_true[:, 1] - y_pred[:, 1]) // xy_step
+
+    xy_manhattan_distance = x_manhattan_distance + y_manhattan_distance
+    xy_hist = np.zeros(k, dtype=np.int)
+    for i in range(k):
+        xy_hist[i] = np.sum(xy_manhattan_distance == i)
+
+    print("xy_manhattan_distance hist:", xy_hist[:k])
+
+    xy_manhattan_dist_distribution = xy_hist[:k] / float(len(xy_manhattan_distance))
+    print("xy_manhattan_distance hist:", xy_manhattan_dist_distribution)
+
+    # Calc for angles
+    yaw_pitch_test_true = get_yaw_pitch_from_quaternion_array(y_true[:, 2:])
+    yaw_test_true = yaw_pitch_test_true[:, 0]
+    pitch_test_true = yaw_pitch_test_true[:, 1]
+    yaw_pitch_test_pred = get_yaw_pitch_from_quaternion_array(y_pred[:, 2:])
+    yaw_test_pred = yaw_pitch_test_pred[:, 0]
+    pitch_test_pred = yaw_pitch_test_pred[:, 1]
+
+    yaw_manhattan_distance = abs(angle_diff(yaw_test_true, yaw_test_pred)) // yaw_step
+    pitch_manhattan_distance = abs(angle_diff(pitch_test_true, pitch_test_pred)) // pitch_step
+
+    xyyawpitch_manhattan_distance = \
+        x_manhattan_distance + y_manhattan_distance + yaw_manhattan_distance + pitch_manhattan_distance
+    xyyawpitch_hist = np.zeros(k, dtype=np.int)
+    for i in range(k):
+        xyyawpitch_hist[i] = np.sum(xyyawpitch_manhattan_distance == i)
+
+    print("xyyawpitch_manhattan_distance hist:", xyyawpitch_hist[:k])
+
+    xyyawpitch_manhattan_dist_distribution = xyyawpitch_hist[:k] / float(len(xyyawpitch_manhattan_distance))
+    print("xyyawpitch_manhattan_distance hist:", xyyawpitch_manhattan_dist_distribution)

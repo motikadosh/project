@@ -9,6 +9,7 @@ model_type = 'resnet'  # 'posenet'/'resnet'/'fc'
 multi_gpu = False
 if not multi_gpu:
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ""  # CPU only
 
 import numpy as np
 np.set_printoptions(precision=4, suppress=True)
@@ -69,108 +70,15 @@ roi = (4400, 5500, 800, 800)
 # roi = (3000, 3000, 1600, 1600)
 # roi = (5000, 3000, 400, 400)
 
-# weights_filename = os.path.join(model_sessions_outputs,
-#  'meshNet_2017_10_10-14_13_59-25Epochs-Grid20-almost-PoseNet/hdf5/meshNet_weights.e024-vloss0.3175.hdf5')
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_11_21-09_45_32/hdf5/meshNet_weights.e047-vloss0.5336.hdf5')
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_11_24-09_37_32_60Epochs_Berlin_Grid50/hdf5/meshNet_weights.e038-loss0.54771-vloss0.5626.hdf5')
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_11_28-13_53_12-100Epochs_Berlin_ROI_Grid200_NoAngles/hdf5/meshNet_weights.e093-loss0.07357-vloss0.5875.hdf5')
-
-# Grid 200 - Single angle
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_06-12_40_01-100Epochs_Grid200_Batch4/hdf5/meshNet_weights.e098-loss0.07383-vloss0.4329.hdf5')
-
-# Grid 400 - Single angle
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e085-loss0.04812-vloss0.1097.hdf5')
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_06-13_24_29-100Epochs_Grid400_Batch8/hdf5/meshNet_weights.e088-loss0.05448-vloss0.0942.hdf5')
-
-# Angle only - Single XY
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_13-12_40_52-100Epochs_anglesOnly_Batch8/hdf5/meshNet_weights.e090-loss0.00323-vloss0.0023.hdf5')
-
-# Grid 200 - XY+Angles - Upper 1/3
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_20-10_30_58/hdf5/meshNet_weights.e017-loss0.21648-vloss0.3123.hdf5')
-
-# Grid 200- XY+Angles + Entire image + Edges - angles
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_31-08_53_29-41Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/' +
-# 'meshNet_weights.e038-loss0.09036-vloss0.1261.hdf5')
-# TODO: Run better EPOCH-
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_31-08_53_29_60Epochs_berlinRoi_Grid200_FullImage_Edges/hdf5/' +
-#  'meshNet_weights.e055-loss0.07561-vloss0.1184.hdf5')
-
-# Grid 200- XY+Angles + Entire image + Edges_and_faces - angle
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_27-00_21_50_55Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces/hdf5/meshNet_weights.e026-loss0.08365-vloss0.1302.hdf5')
-
-# Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions
-# weights_filename = os.path.join(model_sessions_outputs,
-# 'meshNet_2017_12_28-09_50_03_100Epochs_berlinRoi_Grid200_FullImage_Edges_and_faces_quternions/hdf5/meshNet_weights.e039-loss42.69920-vloss97.8118.hdf5')
-
-# TODO: Run AGAIN (Weight already update - change data to correct ROI)-
-# Step 20- XY+Angles + Entire image + Edges_and_faces - angle - ROI 5K_3K_800_800
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_01_08-22_10_56_55Epochs_berlinRoi_5K_3K_800_800_Grid_Step_20_FullImage_Edges_and_faces_angle',
-#                                 'hdf5/meshNet_best_loss_weights.e049-loss0.04243-vloss0.1199.hdf5')
-
-# Grid 200- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 1/1/3 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_01_10-11_28_23_60Epochs_berlinRoi_Grid_Step_20_FullImage_Edges_and_faceas_quaternion-low_weight',
-#                                 'hdf5/meshNet_best_loss_weights.e054-loss0.23080-vloss0.6674.hdf5')
-
-# Grid Step 40- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_01_17-17_58_46_16Epochs_berlinRoi_Grid_Step_40_FullImage_Edges_and_faces_quaternion-low_weight',
-#                                 'hdf5/meshNet_best_loss_weights.e013-loss0.37574-vloss1.0122.hdf5')
-
-# Grid Step 10- XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_01_15-18_24_58_27Epochs_berlinRoi_Grid_Step_10_FullImage_Edges_and_faces_quaternion-low_weight',
-#                                 'hdf5/meshNet_best_loss_weights.e025-loss0.22022-vloss0.1463.hdf5')
-
-# Grid Step 20- ROI 3000_4800_1600_1600 - XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_02_14-10_41_36_Train_120Epochs_berlinRoi_3000_4800_1600_1600_Grid_Step_20_FullImage_Edges_and_faces_quaternion-low_weight',
-#                                 'hdf5/meshNet_best_loss_weights.e113-loss0.22775-vloss0.8356.hdf5')
-
-# Grid Step 20- ROI 3000_3000_1600_1600 - XY+Angles + Entire image + Edges_and_faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_03_06-11_43_01_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep_20_FullImage_Edges_and_faces_quaternion-low_weight',
-#                                 'hdf5/meshNet_best_loss_weights.e045-loss0.35340-vloss0.7885.hdf5')
-
-# Grid Step 10- ROI 4400_5500_800_800 - XY+Angles + Entire image + stacked faces - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_03_16-14_37_14_Train_120Epochs_berlinRoi_4400_5500_800_800_GridStep10_stacked_faces/',
-#                                 'hdf5/meshNet_best_loss_weights.e021-loss0.20523-vloss0.1398.hdf5')
-
-# Grid Step 10- ROI 5000_3000_800_800 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_03_18-12_04_25_Train_100Epochs_berlinRoi_5000_3000_800_800_GridStep10_stacked',
-#                                 'hdf5/meshNet_best_loss_weights.e025-loss0.22284-vloss0.2038.hdf5')
-
-# Grid Step 20- ROI 3000_3000_1600_1600 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
-# weights_filename = os.path.join(model_sessions_outputs,
-#                                 'meshNet_2018_03_19-14_04_56_Train_120Epochs_berlinRoi_3000_3000_1600_1600_GridStep20_stacked',
-#                                 'hdf5/meshNet_best_loss_weights.e035-loss0.39286-vloss0.4575.hdf5')
-
-# Grid Step 20- ROI 4400 5500_800 800 - XY+Angles + Entire image + stacked - quaternions - Low quaternions loss 0.5/0.5/1.5 instead of 150/150/500
 weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_03_09-21_34_54_Train_200Epochs_berlinRoi_4400_5500_800_800_GridStep20_depth',
-                                'hdf5/meshNet_best_loss_weights.e178-loss0.07943-vloss0.3533.hdf5')
-
+                                'meshNet_2018_04_10-23_05_16_Train_resnet50_120Epochs_berlinRoi_4400_5500_800_800_GridStep20_edges',
+                                'hdf5', 'meshNet_best_loss_weights.e119-loss0.02059-vloss0.1981.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
 x_type = 'stacked_faces'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
-use_cache = False
-use_pickle = False
+use_cache = True
 render_to_screen = False
 evaluate = True
 load_weights = False
@@ -211,24 +119,19 @@ sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, g
 
 # TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
 def main():
+    global weights_filename
+
     logger.Logger(sess_info)
     print("Entered %s" % sess_info.title)
 
-    if load_weights and use_pickle:
-        # pickle_full_path = os.path.join(os.path.dirname(weights_filename), os.path.pardir, 'pickle',
-        #                                 sess_info.title + '.pkl')
-        # loader = meshNet_loader.DataLoader()
-        # loader.load_pickle(pickle_full_path, part_of_data=part_of_data)
-        pass
-    else:
-        loader = meshNet_loader.DataLoader()
-        loader.load(train_dir=train_dir,
-                    test_dir=test_dir,
-                    x_range=(0, 1),
-                    x_type=x_type,
-                    y_type=y_type,
-                    part_of_data=part_of_data,
-                    use_cache=use_cache)
+    loader = meshNet_loader.DataLoader()
+    loader.load(train_dir=train_dir,
+                test_dir=test_dir,
+                x_range=(0, 1),
+                x_type=x_type,
+                y_type=y_type,
+                part_of_data=part_of_data,
+                use_cache=use_cache)
 
     if mess:
         print("Creating a MESS - x_train shuffle")
@@ -545,6 +448,14 @@ def detailed_evaluation(model, loader, output_number):
 
     pickle_title = os.path.basename(os.path.splitext(weights_filename)[0])
     utils.save_pickle(sess_info, data, pickle_title)
+
+    print("Handling TRAIN")
+    k = 5
+    utils.train_result(y_train_true, y_train_pred, k)
+
+    print("Handling TEST")
+    xy_step = data['grid_step']
+    utils.test_result(y_test_true, y_test_pred, xy_step, k=100)
 
     errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test)
 
