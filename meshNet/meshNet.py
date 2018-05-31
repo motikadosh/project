@@ -30,11 +30,13 @@ import consts
 # import matplotlib.pyplot as plt
 
 if os.path.expanduser('~') == '/home/moti':
-    data_sessions_outputs = '/home/moti/cg/project/sessions_outputs'
-    model_sessions_outputs = '/home/moti/cg/project/meshNet/sessions_outputs'
+    project_base_dir = '/home/moti/cg/project'
 else:
-    data_sessions_outputs = '/mnt/SSD1/moti/project/sessions_outputs'
-    model_sessions_outputs = '/mnt/SSD1/moti/project/meshNet/sessions_outputs'
+    # project_base_dir = '/mnt/SSD1/moti/project'
+    project_base_dir = '/mnt/arik_2T_usb/project'
+
+data_sessions_outputs = os.path.join(project_base_dir, 'sessions_outputs')
+model_sessions_outputs = os.path.join(project_base_dir, 'meshNet/sessions_outputs')
 
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid200/')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800Grid400/')
@@ -48,7 +50,7 @@ else:
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_4800_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_400_400_GridStep_10')
-data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
+# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep10_depth')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep20_depth')
 
@@ -57,14 +59,19 @@ data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_Grid
 # data_dir = os.path.join(data_sessions_outputs, 'berlin_grid50/')
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-12_40_19-grid_20/')
 # data_dir = os.path.join(data_sessions_outputs, 'project_2017_09_06-21_41_07-grid_40/')
+
+data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_-1600_-800_1600_1600_GridStep10')
+
 train_dir = os.path.join(data_dir, 'train')
 # test_dir = None
 test_dir = os.path.join(data_dir, 'test')
 
 mesh_name = 'berlin'
+
+roi = (-1600, -800, 400, 400)
 grid_step = 20
 
-roi = (4400, 5500, 800, 800)
+# roi = (4400, 5500, 800, 800)
 # roi = (5000, 3000, 800, 800)
 # roi = (3000, 4800, 1600, 1600)
 # roi = (3000, 3000, 1600, 1600)
@@ -75,7 +82,7 @@ weights_filename = os.path.join(model_sessions_outputs,
                                 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02059-vloss0.1981.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'depth'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = 'edges'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_cache = True
@@ -130,7 +137,8 @@ def main():
                 x_type=x_type,
                 y_type=y_type,
                 part_of_data=part_of_data,
-                use_cache=use_cache)
+                use_cache=use_cache,
+                auto_collect=True, roi=roi, grid_step=grid_step)
 
     if mess:
         print("Creating a MESS - x_train shuffle")
