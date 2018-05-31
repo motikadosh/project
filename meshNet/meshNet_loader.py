@@ -2,11 +2,11 @@ from __future__ import print_function
 from __future__ import division
 
 import os
-import pickle
+import random
 import numpy as np
 import cv2
 from pyquaternion import Quaternion
-from sklearn.utils import shuffle as sk_shuffle
+from tqdm import tqdm
 
 import utils
 import split
@@ -16,54 +16,9 @@ import consts
 IMAGE_SIZE = (int(800/5), int(600/5))
 # IMAGE_SIZE = (int(800/5), int((600/3)/5))
 
-
-def apply_smoothing(image, kernel_size=7):
-    """
-    kernel_size must be positive and odd
-    """
-    return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
-
-
-def flip_imgs_colors(imgs):
-    # Flip image colors (White <-> Black)
-    white_imgs = np.full_like(imgs, 255)
-    imgs = white_imgs - imgs
-    imgs[imgs > 0] = 255  # Make sure all values are 0/255
-    return imgs
-
-
-def load_image(file_url, image_size):
-    img = cv2.imread(file_url, cv2.IMREAD_GRAYSCALE)
-    if img.shape != image_size:
-        # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
-        img = cv2.resize(img, image_size, interpolation=cv2.INTER_AREA)
-
-    return img
-
-
-def load_pose_file(file_url):
-    pose_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.txt'
-    with open(pose_file_url) as f:
-        line = f.readline()
-        _, pose_txt = line.split('=', 1)
-        pose_txt = pose_txt.strip(' \t\n\r)(')
-        pose = pose_txt.split(", ")
-        if len(pose) != 6:
-            raise Exception("Bad pose value in " + pose_file_url)
-
-        pose = np.array([float(i) for i in pose])
-        return pose
-
-
-def load_xf_file(file_url):
-    xf_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.xf'
-    with open(xf_file_url) as f:
-        array = []
-        for line in f:  # Read rest of lines
-            array.append([float(x) for x in line.split()])
-        xf = np.array(array)
-        # print(xf)
-        return xf
+EDGE_EXT = '_edges.png'
+FACE_EXT = '_faces.png'
+DEPTH_EXT = '_depth.exr'
 
 
 class LabelsParser:
@@ -75,13 +30,38 @@ class LabelsParser:
         return np.empty(img_num, dtype=np.object)
 
     @staticmethod
+    def load_pose_file(file_url):
+        pose_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.txt'
+        with open(pose_file_url) as f:
+            line = f.readline()
+            _, pose_txt = line.split('=', 1)
+            pose_txt = pose_txt.strip(' \t\n\r)(')
+            pose = pose_txt.split(", ")
+            if len(pose) != 6:
+                raise Exception("Bad pose value in " + pose_file_url)
+
+            pose = np.array([float(i) for i in pose])
+            return pose
+
+    @staticmethod
+    def load_xf_file(file_url):
+        xf_file_url = os.path.splitext(file_url)[0][:-len('_edges')] + '.xf'
+        with open(xf_file_url) as f:
+            array = []
+            for line in f:  # Read rest of lines
+                array.append([float(x) for x in line.split()])
+            xf = np.array(array)
+            # print(xf)
+            return xf
+
+    @staticmethod
     def read_label(cur_file):
         try:
-            pose = load_pose_file(cur_file)
+            pose = LabelsParser.load_pose_file(cur_file)
             if pose is None:
                 return None
 
-            xf = load_xf_file(cur_file)
+            xf = LabelsParser.load_xf_file(cur_file)
             if xf is None:
                 return None
 
@@ -93,26 +73,107 @@ class LabelsParser:
             return None
 
 
-def show_depth_img(img):
-    max = img.max()
-    depth_img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1,
-                              mask=(img != max).astype(np.uint8))
-
-    depth_img[img == max] = 255
-
-    cv2.imshow('depth_image', depth_img)
-    cv2.waitKey(0)
-
-
 class ImageProcessor:
-    def __init__(self, x_type):
-        self.x_type = x_type
+    def __init__(self):
+        pass
 
     @staticmethod
-    def _add_random_lines(img, lines_per_image=5):
-        # import cv2
-        import random
+    def allocate_images(img_num, image_size):
+        x_edges = np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.uint8)
+        x_faces = np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.uint8)
+        x_depth = np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.float32)
+        return x_edges, x_faces, x_depth
 
+    @staticmethod
+    def load_image(file_url, image_size, skip_upscale=True):
+        img = cv2.imread(file_url, cv2.IMREAD_GRAYSCALE)
+
+        if img.shape[1] / float(img.shape[0]) != image_size[0] / float(image_size[1]):
+            print("Wrong aspect ratio. Expected %f, received %f" % (image_size[1] / float(image_size[0]),
+                                                                    img.shape[1] / float(img.shape[0])))
+            return None
+
+        if skip_upscale and (img.shape[0] < image_size[0] or img.shape[1] < image_size[1]):
+            print("Skipping small image. Expected (%s,%s), received (%s,%s)" %
+                  (image_size[0], image_size[1], img.shape[0], img.shape[1]))
+            return None
+
+        if img.shape != image_size:
+            # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
+            img = cv2.resize(img, image_size, interpolation=cv2.INTER_AREA)
+
+        if len(img.shape) == 2:
+            img = np.expand_dims(img, axis=-1)
+
+        return img
+
+    @staticmethod
+    def load_face_image(file_url, image_size, flip):
+        face_image = ImageProcessor.load_image(file_url[:-len(EDGE_EXT)] + FACE_EXT, image_size)
+        return ImageProcessor.flip_imgs_colors(face_image) if flip else face_image
+
+    @staticmethod
+    def load_depth_map(file_url, image_size):
+        depth_map = cv2.imread(file_url[:-len(EDGE_EXT)] + DEPTH_EXT, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+        if depth_map.shape != image_size:
+            # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
+            depth_map = cv2.resize(depth_map, image_size, interpolation=cv2.INTER_AREA)
+
+        if len(depth_map.shape) == 2:
+            depth_map = np.expand_dims(depth_map, axis=-1)
+
+        return depth_map
+
+    @staticmethod
+    def show_depth_img(img, wait_key=True):
+        max_val = img.max()
+        depth_img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8UC1,
+                                  mask=(img != max_val).astype(np.uint8))
+
+        depth_img[img == max_val] = 255
+
+        cv2.imshow('depth', depth_img)
+        if wait_key:
+            cv2.waitKey(0)
+
+    @staticmethod
+    def show_images(x):
+        print('Entered show_images(): Press Esc to quit')
+
+        for i in xrange(len(x)):
+            if x.shape[3] == 1:
+                cv2.imshow('edge', x[i, :, :, 0].astype(np.uint8))
+
+            if x.shape[3] == 2:
+                cv2.imshow('edge', x[i, :, :, 0].astype(np.uint8))
+                cv2.imshow('face', x[i, :, :, 1].astype(np.uint8))
+
+            if x.shape[3] == 3:
+                cv2.imshow('edge', x[i, :, :, 0].astype(np.uint8))
+                cv2.imshow('face', x[i, :, :, 1].astype(np.uint8))
+                ImageProcessor.show_depth_img(x[i, :, :, 2], wait_key=False)
+
+            key = cv2.waitKey(0)
+            if key == 27:  # Esc
+                break
+
+    @staticmethod
+    def apply_smoothing(image, kernel_size=7):
+        """
+        kernel_size must be positive and odd
+        """
+        return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+
+    @staticmethod
+    def flip_imgs_colors(imgs):
+        # Flip image colors (White <-> Black)
+        white_imgs = np.full_like(imgs, 255)
+        imgs = white_imgs - imgs
+        imgs[imgs > 0] = 255  # Make sure all values are 0/255
+        return imgs
+
+    @staticmethod
+    def add_random_lines(img, lines_per_image=5):
         width = img.shape[1]
         height = img.shape[0]
 
@@ -124,72 +185,160 @@ class ImageProcessor:
             cv2.line(img, (x1, y1), (x2, y2), 255)
 
     @staticmethod
-    def _load_face_image(cur_file, image_size, flip=True):
-        face_image = load_image(cur_file[:-len('_edges.png')] + '_faces.png', image_size)
-        return flip_imgs_colors(face_image) if flip else face_image
+    def process(x_edges, x_faces, x_depth, x_type):
 
-    @staticmethod
-    def _load_depth_map(cur_file, image_size):
-        file_url = cur_file[:-len('_edges.png')] + '_depth.exr'
-        depth_map = cv2.imread(file_url, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
-        if depth_map.shape != image_size:
-            # print("Resizing image on load: " + file_url + ", original size  " + str(img.shape))
-            depth_map = cv2.resize(depth_map, image_size, interpolation=cv2.INTER_AREA)
-        return depth_map
+        # TODO: Comment or add as option
+        # self._add_random_lines(img, lines_per_image=5)
 
-    def allocate_images(self, img_num, image_size):
-        if self.x_type == 'depth':
-            return np.empty((img_num, image_size[1], image_size[0], 3), dtype=np.float32)
-        elif self.x_type == 'stacked_faces':
-            return np.empty((img_num, image_size[1], image_size[0], 2), dtype=np.float32)
-        else:
-            return np.empty((img_num, image_size[1], image_size[0], 1), dtype=np.float32)
+        if x_type == 'edges':
+            x = ImageProcessor.flip_imgs_colors(x_edges)
+            x = x.astype(np.float32)
 
-    def process(self, img, cur_file, label):
-        try:
-            img = flip_imgs_colors(img)
+        elif x_type == 'faces':
+            x_faces = ImageProcessor.flip_imgs_colors(x_faces)
+            x = x_faces.astype(np.float32)
 
-            # TODO: Comment or add as option
-            # self._add_random_lines(img, lines_per_image=5)
+        elif x_type == 'gauss_blur_15':
+            x = np.empty((len(x_edges), x_edges.shape[1], x_edges.shape[2], 1), dtype=np.float32)
 
-            if self.x_type == 'edges':
-                pass
+            for i in xrange(len(x_edges)):
+                img = x_edges[i]
+                img = ImageProcessor.flip_imgs_colors(img)
+                img = ImageProcessor.apply_smoothing(img, 15)
 
-            elif self.x_type == 'faces':
-                img = self._load_face_image(cur_file, utils.get_image_size(img), flip=True)
+                face_image = x_faces[i]
+                face_image = ImageProcessor.flip_imgs_colors(face_image)
 
-            elif self.x_type == 'gauss_blur_15':
-                img = apply_smoothing(img, 15)
-                face_image = self._load_face_image(cur_file, utils.get_image_size(img))
                 img = cv2.bitwise_and(img, face_image)
+                x[i, :, :, 0] = img
 
-            elif self.x_type == 'edges_on_faces':
-                face_image = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
+        elif x_type == 'edges_on_faces':
+            x = np.empty((len(x_edges), x_edges.shape[1], x_edges.shape[2], 1), dtype=np.float32)
+
+            for i in xrange(len(x_edges)):
+                img = x_edges[i]
+                img = ImageProcessor.flip_imgs_colors(img)
+
+                face_image = x_faces[i]
                 img = cv2.bitwise_or(img, face_image)
                 # imshow('edges_on_faces', img)
+                x[i, :, :, 0] = img
 
-            elif self.x_type == 'stacked_faces':
-                img_stack = np.empty((img.shape[0], img.shape[1], 2), dtype=np.float32)
-                img_stack[:, :, 0] = img
-                img_stack[:, :, 1] = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
-                img = img_stack
+        elif x_type == 'stacked_faces':
+            x = np.empty((len(x_edges), x_edges.shape[1], x_edges.shape[2], 2), dtype=np.float32)
+            x[:, :, :, 0] = x_edges[:, :, :, 0]
+            x[:, :, :, 1] = x_faces[:, :, :, 0]
 
-            elif self.x_type == 'depth':
-                img_stack = np.empty((img.shape[0], img.shape[1], 3), dtype=np.float32)
-                img_stack[:, :, 0] = img
-                img_stack[:, :, 1] = self._load_face_image(cur_file, utils.get_image_size(img), flip=False)
-                img_stack[:, :, 2] = self._load_depth_map(cur_file, utils.get_image_size(img))
-                # show_depth_img(img_stack[:, :, 2])
-                img = img_stack
+        elif x_type == 'depth':
+            x = np.empty((len(x_edges), x_edges.shape[1], x_edges.shape[2], 3), dtype=np.float32)
+            x[:, :, :, 0] = x_edges[:, :, :, 0]
+            x[:, :, :, 1] = x_faces[:, :, :, 0]
+            x[:, :, :, 2] = x_depth[:, :, :, 0]
+            # ImageProcessor.show_depth_img(x[0, :, :, 2])
 
-            else:
-                raise Exception("Unknown x_type")
+        else:
+            raise Exception("Unknown x_type")
 
-            return img
+        # ImageProcessor.show_images(x)
+        return x
 
-        except Exception as e:
-            print("Unexpected error:", e)
-            return None
+
+def load_data(data_dir, image_size, x_type, part_of_data=1.0, recursive=True, use_cache=True):
+    print("Loading data_dir [%s], image_size [%s], x_type [%s], part_of_data [%s], recursive [%s], use_cache [%s]"
+          % (data_dir, image_size, x_type, part_of_data, recursive, use_cache))
+
+    if not os.path.isdir(data_dir):
+        raise Exception("Directory " + data_dir + " does not exist")
+
+    with utils.cd(data_dir):
+        params_prefix = str(part_of_data)
+        params_prefix += "_%sx%s" % (image_size[0], image_size[1]) if image_size is not None else ""
+        params_prefix += "_r" if recursive else ""
+        print("Cache params_prefix:", params_prefix)
+
+        x_edges = None
+        x_faces = None
+        x_depth = None
+        if use_cache and (image_size is not None and
+                          (os.path.isfile('edges_' + params_prefix + "_x.npy") and
+                           os.path.isfile('faces_' + params_prefix + "_x.npy") and
+                           os.path.isfile('depth_' + params_prefix + "_x.npy"))
+                          or image_size is None and os.path.isfile(params_prefix + "_file_urls.npy")):
+            print("Loading cache...")
+            if image_size is not None:
+                x_edges = np.load('edges_' + params_prefix + "_x.npy")
+                x_faces = np.load('faces_' + params_prefix + "_x.npy")
+                x_depth = np.load('depth_' + params_prefix + "_x.npy")
+
+            file_urls = np.load(params_prefix + "_file_urls.npy")
+            labels = np.load(params_prefix + "_labels.npy")
+            print("Done loading cache")
+        else:
+            print("Loading files...")
+            files = utils.get_files_with_ext(data_dir, ext_list=EDGE_EXT, recursive=recursive, sort=False)
+
+            files = utils.part_of(files, part=part_of_data)
+
+            img_num = len(files)
+            labels = LabelsParser.allocate_labels(img_num)
+            file_urls = np.empty(img_num, dtype="object")
+            if image_size is not None:
+                x_edges, x_faces, x_depth = ImageProcessor.allocate_images(img_num, image_size)
+
+            cnt = 0
+            for cur_file in tqdm(files):
+                if image_size is not None:
+                    edge_img = ImageProcessor.load_image(cur_file, image_size)
+                    face_img = ImageProcessor.load_face_image(cur_file, image_size, flip=False)
+                    depth_img = ImageProcessor.load_depth_map(cur_file, image_size)
+                    if edge_img is None or face_img is None or depth_img is None:
+                        continue
+
+                    x_edges[cnt, :, :, :] = edge_img
+                    x_faces[cnt, :, :, :] = face_img
+                    x_depth[cnt, :, :, :] = depth_img
+
+                label = LabelsParser.read_label(cur_file)
+                if label is None:
+                    print(cur_file + " label is not valid skipping")
+                    continue
+
+                labels[cnt] = label
+
+                file_urls[cnt] = os.path.join(data_dir, cur_file)
+
+                cnt += 1
+
+            if image_size is not None:
+                x_edges = x_edges[:cnt]
+                x_faces = x_faces[:cnt]
+                x_depth = x_depth[:cnt]
+
+            labels = labels[:cnt]
+            file_urls = file_urls[:cnt]
+
+            if use_cache:
+                try:
+                    print("Trying saving cache...")
+                    if image_size is not None:
+                        np.save('edges_' + params_prefix + "_x.npy", x_edges)
+                        np.save('faces_' + params_prefix + "_x.npy", x_faces)
+                        np.save('depth_' + params_prefix + "_x.npy", x_depth)
+
+                    np.save(params_prefix + "_labels.npy", labels)
+
+                    np.save(params_prefix + "_file_urls.npy", file_urls)
+                    print("Cache saved")
+                except Exception as e:
+                    print(e)
+                    print("Cache NOT saved due to exception. Probably no space left on disk")
+
+    x = None
+    if image_size is not None:
+        x = ImageProcessor.process(x_edges, x_faces, x_depth, x_type)
+
+    print("Loaded " + str(len(file_urls)) + " images from " + data_dir)
+    return (labels, file_urls) if image_size is None else (x, labels, file_urls)
 
 
 def process_labels(y_train, y_test, y_type):
@@ -288,18 +437,12 @@ class DataLoader:
         self.x_type = x_type
         self.y_type = y_type
 
-        # y_type is done after cache is loaded so no need to use in prefix
-        cache_prefix = "%s" % x_type
         self.x_train, self.labels_train, self.file_urls_train = \
-            utils.load_folder(cache_prefix, train_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                              shuffle=True, recursive=True, save_cache=use_cache, skip_upscale=True,
-                              labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
+            load_data(train_dir, image_size, x_type, part_of_data=part_of_data, use_cache=use_cache)
 
         if test_dir is not None:
             self.x_test, self.labels_test, self.file_urls_test = \
-                utils.load_folder(cache_prefix, test_dir, image_size, ext_list='_edges.png', part_of_data=part_of_data,
-                                  shuffle=True, recursive=True, save_cache=use_cache, skip_upscale=True,
-                                  labels_parser=LabelsParser, process_image_fn=ImageProcessor(x_type))
+                load_data(test_dir, image_size, x_type, part_of_data=part_of_data, use_cache=use_cache)
         else:
             print("Test dir not supplied. Splitting train data...")
             self.x_train, _, self.x_test, self.labels_train, _, self.labels_test, self.file_urls_train, _, \

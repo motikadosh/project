@@ -48,7 +48,7 @@ else:
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_4800_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep_20')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_400_400_GridStep_10')
-# data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
+data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_4400_5500_800_800_GridStep20_depth')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_5000_3000_800_800_GridStep10_depth')
 # data_dir = os.path.join(data_sessions_outputs, 'berlinRoi_3000_3000_1600_1600_GridStep20_depth')
 
@@ -75,7 +75,7 @@ weights_filename = os.path.join(model_sessions_outputs,
                                 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02059-vloss0.1981.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'stacked_faces'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = 'depth'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_cache = True
@@ -117,7 +117,6 @@ sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, g
                                            x_type, y_type, mess)
 
 
-# TODO: Save some ~10 random sample images+labels to output dir - to make sure what the model trained on
 def main():
     global weights_filename
 
@@ -183,6 +182,10 @@ def main():
 
     print("image_shape:", image_shape)
     print("nb_outs:", nb_outs)
+    print("Train shape:", loader.x_train.shape)
+    print("Test shape:", loader.x_test.shape)
+    print("")
+
     print("Model name:", model_name)
     print("Model function input arguments:", params)
     print("Batch size:", batch_size)
@@ -235,8 +238,8 @@ def main():
     else:
         history = None
 
+    hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
     if not test_only:
-        hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
         weights_list = os.listdir(hdf5_dir)
     else:
         weights_list = ["dummy"]
@@ -246,7 +249,7 @@ def main():
             weights_filename = os.path.join(hdf5_dir, weights_fname)
             meshNet_model.load_model_weights(model, weights_filename)
 
-        if evaluate:
+        if evaluate and not mess:
             print("Evaluating model. Test shape", loader.y_test.shape)
             if model_type == 'posenet':
                 test_scores = model.evaluate(loader.x_test, [loader.y_test[:, :2], loader.y_test[:, 2:],
@@ -271,7 +274,6 @@ def main():
         #     loader.save_pickle(sess_info)
 
         if model_type == 'posenet':
-            # TODO: Choose best output according to test_score
             # detailed_evaluation(model, loader, 1)
             # detailed_evaluation(model, loader, 2)
             detailed_evaluation(model, loader, 3)
@@ -400,21 +402,22 @@ def detailed_evaluation(model, loader, output_number):
 
     normalized = False
     print("Normalized:", normalized)
-    y_train_true, y_train_pred, y_test_true, y_test_pred = inverse_transform(loader, normalized, y_train_pred, y_test_pred)
+    y_train_true, y_train_pred, y_test_true, y_test_pred = inverse_transform(loader, normalized, y_train_pred,
+                                                                             y_test_pred)
 
     xy_error_train, angle_error_train = calc_stats(y_train_true, y_train_pred, normalized=normalized,
                                                    dataset_name='Train')
     xy_error_test, angle_error_test = calc_stats(y_test_true, y_test_pred, normalized=normalized, dataset_name='Test')
 
     # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='xy', idx=i,
+    #                                is_train=True, normalized=False, asc=False, figure_num=i)
     # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='angle', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='angle', idx=i,
+    #                                is_train=True, normalized=False, asc=False, figure_num=i)
     # for i in [0, 1, 2, 1000, 4000, len(y_train_pred)-1]:
-    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='comb', idx=i, is_train=True,
-    #                               normalized=False, asc=False, figure_num=i)
+    #     visualize.view_prediction(data_dir, roi, loader, y_train_pred, y_test_pred, errors_by='comb', idx=i,
+    #                                is_train=True, normalized=False, asc=False, figure_num=i)
 
     data = {
         "model_type": model_type,

@@ -252,11 +252,7 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
                         print(cur_file + " label is not valid skipping")
                         continue
 
-                    if isinstance(labels, list):
-                        for i in range(len(labels)):
-                            labels[i][cnt] = label[i]
-                    else:
-                        labels[cnt] = label
+                    labels[cnt] = label
 
                 file_urls[cnt] = os.path.join(folder, cur_file)
 
@@ -266,25 +262,26 @@ def load_folder(cache_prefix, folder, image_size, ext_list=None, part_of_data=1.
                 x = x[:cnt]
 
             if labels_parser is not None:
-                if isinstance(labels, list):
-                    for i in range(len(labels)):
-                        labels[i] = labels[i][:cnt]
-                else:
-                    labels = labels[:cnt]
+                labels = labels[:cnt]
             file_urls = file_urls[:cnt]
 
             if save_cache:
-                print("Cache saved")
-                if image_size is not None:
-                    np.save(params_prefix + "_x.npy", x)
-                if labels is not None:
-                    if isinstance(labels, list):
-                        for i in range(len(labels)):
-                            np.save(params_prefix + "_labels_" + str(i) + ".npy", labels[i])
-                    else:
-                        np.save(params_prefix + "_labels.npy", labels)
+                try:
+                    print("Trying to save cache")
+                    if image_size is not None:
+                        np.save(params_prefix + "_x.npy", x)
+                    if labels is not None:
+                        if isinstance(labels, list):
+                            for i in range(len(labels)):
+                                np.save(params_prefix + "_labels_" + str(i) + ".npy", labels[i])
+                        else:
+                            np.save(params_prefix + "_labels.npy", labels)
 
-                np.save(params_prefix + "_file_urls.npy", file_urls)
+                    np.save(params_prefix + "_file_urls.npy", file_urls)
+                    print("Cache saved")
+                except Exception as e:
+                    print(e)
+                    print("Cache NOT saved due to exception")
 
     print("Loaded " + str(file_urls.shape[0]) + " images from " + folder)
     return (labels, file_urls) if image_size is None else (x, labels, file_urls)
