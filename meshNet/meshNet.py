@@ -8,7 +8,7 @@ model_type = 'resnet'  # 'posenet'/'resnet'/'fc'
 
 multi_gpu = False
 if not multi_gpu:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     # os.environ["CUDA_VISIBLE_DEVICES"] = ""  # CPU only
 
 import numpy as np
@@ -68,8 +68,10 @@ test_dir = os.path.join(data_dir, 'test')
 
 mesh_name = 'berlin'
 
-roi = (-1600, -800, 400, 400)
-grid_step = 20
+# roi = (-1600, -800, 400, 400)
+# grid_step = 20
+roi = None
+grid_step = None
 
 # roi = (4400, 5500, 800, 800)
 # roi = (5000, 3000, 800, 800)
@@ -82,7 +84,7 @@ weights_filename = os.path.join(model_sessions_outputs,
                                 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02059-vloss0.1981.hdf5')
 
 # TODO: Can this be inferred in case we are just testing?
-x_type = 'edges'       # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
+x_type = None  # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
 y_type = 'quaternion'  # 'angle', 'quaternion', 'matrix'
 
 use_cache = True
@@ -118,14 +120,16 @@ elif debug_level == 2:  # Full Debug
 else:
     raise Exception("Invalid debug level " + str(debug_level))
 
-
-# Script config
-sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights,
-                                           x_type, y_type, mess)
+sess_info = None
 
 
 def main():
     global weights_filename
+    global sess_info
+
+    # Script config
+    sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights,
+                                               x_type, y_type, mess)
 
     logger.Logger(sess_info)
     print("Entered %s" % sess_info.title)
@@ -472,4 +476,17 @@ def detailed_evaluation(model, loader, output_number):
 
 
 if __name__ == '__main__':
-    main()
+    session_list = [
+        # (roi, grid_step, x_type)
+        ((-1600, -800, 400, 400), 20, 'depth'),
+        ((-1200, -800, 400, 400), 20, 'edges'),
+        ((-1200, -800, 400, 400), 20, 'stacked_faces'),
+        ((-1200, -800, 400, 400), 20, 'depth'),
+    ]
+
+    idx = 0
+    for roi, grid_step, x_type in session_list:
+        print("\n\nNew session [%s]: roi [%s], grid_step [%s], x_type [%s]" % idx, roi, grid_step, x_type)
+        main()
+        print("Done session [%s]: roi [%s], grid_step [%s], x_type [%s]" % idx, roi, grid_step, x_type)
+        idx += 1
