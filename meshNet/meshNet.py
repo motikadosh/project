@@ -331,6 +331,10 @@ def calc_stats(y_true, y_pred, normalized=False, dataset_name='dataset'):
     print("%s angle error. Mean %s, median %s, std %s" % (dataset_name, np.mean(angle_error), np.median(angle_error),
                                                           np.std(angle_error)))
 
+    print("xy (mean, median, std), angle (mean, median, std): (%s, %s, %s, %s, %s, %s)" %
+          (np.mean(xy_error), np.median(xy_error), np.std(xy_error),
+           np.mean(angle_error), np.median(angle_error), np.std(angle_error)))
+
     return xy_error, angle_error
 
 
