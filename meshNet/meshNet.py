@@ -79,9 +79,7 @@ grid_step = None
 # roi = (3000, 3000, 1600, 1600)
 # roi = (5000, 3000, 400, 400)
 
-weights_filename = os.path.join(model_sessions_outputs,
-                                'meshNet_2018_04_10-23_05_16_Train_resnet50_120Epochs_berlinRoi_4400_5500_800_800_GridStep20_edges',
-                                'hdf5', 'meshNet_best_loss_weights.e119-loss0.02059-vloss0.1981.hdf5')
+weights_filename = None
 
 # TODO: Can this be inferred in case we are just testing?
 x_type = None  # 'edges', 'faces', 'gauss_blur_15', 'edges_on_faces', 'stacked_faces', 'depth'
@@ -125,13 +123,7 @@ sess_info = None
 
 def main():
     global weights_filename
-    global sess_info
 
-    # Script config
-    sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights,
-                                               x_type, y_type, mess)
-
-    logger.Logger(sess_info)
     print("Entered %s" % sess_info.title)
 
     loader = meshNet_loader.DataLoader()
@@ -253,6 +245,7 @@ def main():
     hdf5_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir, 'hdf5')
     if not test_only:
         weights_list = os.listdir(hdf5_dir)
+        weights_list.sort()
     else:
         weights_list = ["dummy"]
 
@@ -285,16 +278,19 @@ def main():
         # if not test_only:
         #     loader.save_pickle(sess_info)
 
-        if model_type == 'posenet':
-            # detailed_evaluation(model, loader, 1)
-            # detailed_evaluation(model, loader, 2)
-            detailed_evaluation(model, loader, 3)
-        elif model_type == 'resnet':
-            detailed_evaluation(model, loader, 1)
-        elif model_type == 'fc':
-            detailed_evaluation(model, loader, 1)
-        else:
-            raise ValueError("Unsupported model type:", model_type)
+        try:
+            if model_type == 'posenet':
+                # detailed_evaluation(model, loader, 1)
+                # detailed_evaluation(model, loader, 2)
+                detailed_evaluation(model, loader, 3)
+            elif model_type == 'resnet':
+                detailed_evaluation(model, loader, 1)
+            elif model_type == 'fc':
+                detailed_evaluation(model, loader, 1)
+            else:
+                raise ValueError("Unsupported model type:", model_type)
+        except Exception as e:
+            print("detailed evaluation failed. Warning: {}".format(e))
 
     if history is not None:
         visualize.visualize_history(history, sess_info, render_to_screen)
@@ -477,16 +473,60 @@ def detailed_evaluation(model, loader, output_number):
 
 if __name__ == '__main__':
     session_list = [
-        # (roi, grid_step, x_type)
-        ((-1600, -800, 400, 400), 20, 'depth'),
-        ((-1200, -800, 400, 400), 20, 'edges'),
-        ((-1200, -800, 400, 400), 20, 'stacked_faces'),
-        ((-1200, -800, 400, 400), 20, 'depth'),
+        # (roi, grid_step, x_type, load_weights, initial_epoch, weights_filename)
+        # debug
+        # ((-1300, -800, 50, 50), 20, 'edges', False, 0, None),  # debug
+        # ((-1300, -800, 50, 50), 20, 'edges', False, 0, None),  # debug
+
+        # 400x400
+        # ((-1600, -800, 400, 400), 20, 'edges', False, 0, None),
+        # ((-1600, -800, 400, 400), 20, 'stacked_faces', False, 0, None),
+        # ((-1600, -800, 400, 400), 20, 'depth', False, 0, None),
+
+        # ((-1200, -800, 400, 400), 20, 'edges', False, 0, None),
+        # ((-1200, -800, 400, 400), 20, 'stacked_faces', False, 0, None),
+        # ((-1200, -800, 400, 400), 20, 'depth', False, 0, None),
+
+        # ((-1600, -400, 400, 400), 20, 'edges', False, 0, None),
+        # ((-1600, -400, 400, 400), 20, 'stacked_faces', False, 0, None),
+        # ((-1600, -400, 400, 400), 20, 'depth', False, 0, None),
+
+        # ((-1200, -400, 400, 400), 20, 'edges', False, 0, None),
+        # ((-1200, -400, 400, 400), 20, 'stacked_faces', False, 0, None),
+        # ((-1200, -400, 400, 400), 20, 'depth', False, 0, None),
+
+        # 800x800
+        # ((-1600, -800, 800, 800), 20, 'edges', False, 0, None),
+        ((-1600, -800, 800, 800), 20, 'stacked_faces', False, 0, None),
+        ((-1600, -800, 800, 800), 20, 'depth', False, 0, None),
+
+        # ((-800, -800, 800, 800), 20, 'edges', False, 0, None),
+        # ((-800, -800, 800, 800), 20, 'stacked_faces', False, 0, None),
+        # ((-800, -800, 800, 800), 20, 'depth', False, 0, None),
+
+        # Resume 400x400
+        #((-1600, -800, 400, 400), 20, 'edges', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_05_31-22_11_07_Train_resnet_120Epochs_berlin_ROI_-1600_-800_400_400_GridStep20_quaternion_edges', 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02682-vloss0.2378.hdf5')),
+        #((-1600, -800, 400, 400), 20, 'stacked_faces', True, 119, os.path.join(model_sessions_outputs, 'meshNet_2018_06_01-05_41_09_Train_resnet_120Epochs_berlin_ROI_-1600_-800_400_400_GridStep20_quaternion_stacked_faces', 'hdf5', 'meshNet_best_loss_weights.e118-loss0.02585-vloss0.1679.hdf5')),
+        #((-1600, -800, 400, 400), 20, 'depth', True, 117, os.path.join(model_sessions_outputs, 'meshNet_2018_06_01-12_25_00_Train_resnet_120Epochs_berlin_ROI_-1600_-800_400_400_GridStep20_quaternion_depth', 'hdf5', 'meshNet_best_loss_weights.e116-loss0.02618-vloss0.1688.hdf5')),
+
+        #((-1200, -800, 400, 400), 20, 'edges', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_06_01-18_27_29_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_edges', 'hdf5', 'meshNet_best_val_loss_weights.e119-loss0.02469-vloss0.2412.hdf5')),
+        #((-1200, -800, 400, 400), 20, 'stacked_faces', True, 119, os.path.join(model_sessions_outputs, 'meshNet_2018_06_02-02_14_48_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_stacked_faces', 'hdf5', 'meshNet_best_loss_weights.e118-loss0.02513-vloss0.2074.hdf5')),
+        #((-1200, -800, 400, 400), 20, 'depth', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_06_02-09_54_40_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_depth', 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02408-vloss0.2183.hdf5')),
     ]
 
     idx = 0
-    for roi, grid_step, x_type in session_list:
-        print("\n\nNew session [%s]: roi [%s], grid_step [%s], x_type [%s]" % idx, roi, grid_step, x_type)
+    for roi, grid_step, x_type, load_weights, initial_epoch, weights_filename in session_list:
+        epochs = initial_epoch + 120
+
+        sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only,
+                                                   load_weights, x_type, y_type, mess)
+        log = logger.Logger(sess_info)
+
+        print("")
+        print("New session [%s]: roi [%s], grid_step [%s], x_type [%s]" % (idx, roi, grid_step, x_type))
         main()
-        print("Done session [%s]: roi [%s], grid_step [%s], x_type [%s]" % idx, roi, grid_step, x_type)
+        print("Done session [%s]: roi [%s], grid_step [%s], x_type [%s]" % (idx, roi, grid_step, x_type))
+        print("")
         idx += 1
+
+        log.close()

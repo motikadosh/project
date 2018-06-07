@@ -11,7 +11,9 @@ import consts
 class StreamLogger(object):
     def __init__(self, log, is_err):
         self.log = log
-        if is_err:
+        self.is_err = is_err
+
+        if self.is_err:
             self.stream = sys.stderr
             sys.stderr = self
         else:
@@ -28,6 +30,12 @@ class StreamLogger(object):
         # you might want to specify some extra behavior here.
         pass
 
+    def done(self):
+        if self.is_err:
+            sys.stderr = self.stream
+        else:
+            sys.stdout = self.stream
+
 
 class Logger(object):
     def __init__(self, sess_info):
@@ -36,8 +44,12 @@ class Logger(object):
 
         log_fname = sess_info.title + '_console_log.txt'
         log_full_path = os.path.join(log_dir, log_fname)
-        # TODO: Do we need to close the file???
         self.log = open(log_full_path, 'w')
 
-        out_logger = StreamLogger(self.log, False)
-        err_logger = StreamLogger(self.log, True)
+        self.out_logger = StreamLogger(self.log, False)
+        self.err_logger = StreamLogger(self.log, True)
+
+    def close(self):
+        self.out_logger.done()
+        self.err_logger.done()
+        self.log.close()
