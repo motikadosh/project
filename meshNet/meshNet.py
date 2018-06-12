@@ -353,12 +353,13 @@ def inverse_transform(loader, normalized, y_train_pred, y_test_pred):
 
 
 def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_test):
+    print("errors_plot: Entered")
     plots_dir = os.path.join(consts.OUTPUT_DIR, sess_info.out_dir)
 
     max_xy_error = max(np.max(xy_error_test), np.max(xy_error_train))
 
     try:
-        # Plot 2d heatmap histograms of the errors
+        print("errors_plot: Plot 2d heatmap histograms of the errors")
         train_2d_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_err_2d_hist.png')
         visualize.multiple_plots(1, 1, 2, 1)
         visualize.plot_2d_hist(xy_error_test, angle_error_test, False, (50, 50), title='Test Err 2D Histogram',
@@ -368,7 +369,7 @@ def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_te
                                xlabel='XY err', ylabel='Angle err', xlim=[0, max_xy_error], ylim=[0, 180],
                                show=render_to_screen, save_path=train_2d_hist_fname)
 
-        # Plot 1D histograms of the errors
+        print("errors_plot: Plot 1D histograms of the xy errors")
         xy_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_xy_err_hist.png')
         visualize.multiple_plots(2, 1, 2, 1)
         visualize.plot_hist(xy_error_train, False, 50, title='Train XY err(%s-samples)' % len(xy_error_train),
@@ -377,6 +378,7 @@ def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_te
         visualize.plot_hist(xy_error_test, False, 50, title='Test XY err(%s-samples)' % len(xy_error_test),
                             ylabel='Samples', show=render_to_screen, save_path=xy_hist_fname)
 
+        print("errors_plot: Plot 1D histograms of the angle errors")
         angle_hist_fname = os.path.join(plots_dir, sess_info.title + '_predictions_angle_err_hist.png')
         visualize.multiple_plots(3, 1, 2, 1)
         visualize.plot_hist(angle_error_train, False, 50, title='Train angle err(%s-samples)' %
@@ -386,6 +388,7 @@ def errors_plot(xy_error_train, angle_error_train, xy_error_test, angle_error_te
                             len(angle_error_test), ylabel='Samples', show=render_to_screen, save_path=angle_hist_fname)
     except Exception as e:
         print("Warning: {}".format(e))
+    print("errors_plot: Done")
 
 
 # visualize.view_prediction(data_dir, loader, y_train_pred, xy_error_train, idx=5)

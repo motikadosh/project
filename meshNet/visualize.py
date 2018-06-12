@@ -8,6 +8,10 @@ import numpy as np
 import numpy.ma as ma
 from scipy.misc import imsave
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+import matplotlib
+# Force matplotlib to not use any Xwindows backend.
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
