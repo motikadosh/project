@@ -504,12 +504,13 @@ if __name__ == '__main__':
 
         # 800x800
         # ((-1600, -800, 800, 800), 20, 'edges', False, 0, None),
-        ((-1600, -800, 800, 800), 20, 'stacked_faces', False, 0, None),
-        ((-1600, -800, 800, 800), 20, 'depth', False, 0, None),
+        # ((-1600, -800, 800, 800), 20, 'stacked_faces', False, 0, None),
+        # ((-1600, -800, 800, 800), 20, 'depth', False, 0, None),
 
-        # ((-800, -800, 800, 800), 20, 'edges', False, 0, None),
-        # ((-800, -800, 800, 800), 20, 'stacked_faces', False, 0, None),
-        # ((-800, -800, 800, 800), 20, 'depth', False, 0, None),
+        # Try train on (-1600, -800, 800, 800) weights. Does it speed up convergence?
+        # ((-800, -800, 800, 800), 20, 'edges', True, 0, os.path.join(model_sessions_outputs, '-1600_-800_800_800/meshNet_2018_06_05-06_50_53_Train_resnet_120Epochs_berlin_ROI_-1600_-800_800_800_GridStep20_quaternion_edges/hdf5/meshNet_best_loss_weights.e119-loss0.01850-vloss0.2434.hdf5')),
+        # ((-800, -800, 800, 800), 20, 'stacked_faces', True, 0, os.path.join(model_sessions_outputs, '-1600_-800_800_800/meshNet_2018_06_06-23_00_47_Train_resnet_120Epochs_berlin_ROI_-1600_-800_800_800_GridStep20_quaternion_stacked_faces/hdf5/meshNet_best_loss_weights.e119-loss0.01717-vloss0.1720.hdf5')),
+        # ((-800, -800, 800, 800), 20, 'depth', True, 0, os.path.join(model_sessions_outputs, '-1600_-800_800_800/meshNet_2018_06_08-14_22_25_Train_resnet_240Epochs_berlin_ROI_-1600_-800_800_800_GridStep20_quaternion_depth/hdf5/meshNet_best_loss_weights.e238-loss0.01335-vloss0.1813.hdf5')),
 
         # Resume 400x400
         #((-1600, -800, 400, 400), 20, 'edges', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_05_31-22_11_07_Train_resnet_120Epochs_berlin_ROI_-1600_-800_400_400_GridStep20_quaternion_edges', 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02682-vloss0.2378.hdf5')),
@@ -519,11 +520,33 @@ if __name__ == '__main__':
         #((-1200, -800, 400, 400), 20, 'edges', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_06_01-18_27_29_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_edges', 'hdf5', 'meshNet_best_val_loss_weights.e119-loss0.02469-vloss0.2412.hdf5')),
         #((-1200, -800, 400, 400), 20, 'stacked_faces', True, 119, os.path.join(model_sessions_outputs, 'meshNet_2018_06_02-02_14_48_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_stacked_faces', 'hdf5', 'meshNet_best_loss_weights.e118-loss0.02513-vloss0.2074.hdf5')),
         #((-1200, -800, 400, 400), 20, 'depth', True, 120, os.path.join(model_sessions_outputs, 'meshNet_2018_06_02-09_54_40_Train_resnet_120Epochs_berlin_ROI_-1200_-800_400_400_GridStep20_quaternion_depth', 'hdf5', 'meshNet_best_loss_weights.e119-loss0.02408-vloss0.2183.hdf5')),
+
+        # 400x400 - Step 10
+        # ((-1600, -800, 400, 400), 10, 'edges', False, 0, None),
+        # ((-1600, -800, 400, 400), 10, 'stacked_faces', False, 0, None),
+        # ((-1600, -800, 400, 400), 10, 'depth', False, 0, None),
+
+        # ((-1200, -800, 400, 400), 10, 'edges', True, 0, os.path.join(model_sessions_outputs, 'gridStep10/-1600_-800_400_400/meshNet_2018_07_10-16_12_33_Train_resnet_240Epochs_berlin_ROI_-1600_-800_400_400_GridStep10_quaternion_edges/hdf5/meshNet_best_loss_weights.e238-loss0.01251-vloss0.0665.hdf5')),
+        # ((-1200, -800, 400, 400), 10, 'stacked_faces', True, 0, os.path.join(model_sessions_outputs, 'gridStep10/-1600_-800_400_400/meshNet_2018_07_12-01_02_18_Train_resnet_240Epochs_berlin_ROI_-1600_-800_400_400_GridStep10_quaternion_stacked_faces/hdf5/meshNet_best_loss_weights.e239-loss0.01256-vloss0.0403.hdf5')),
+        # ((-1200, -800, 400, 400), 10, 'depth', True, 0, os.path.join(model_sessions_outputs, 'gridStep10/-1600_-800_400_400/meshNet_2018_07_13-09_37_01_Train_resnet_240Epochs_berlin_ROI_-1600_-800_400_400_GridStep10_quaternion_depth/hdf5/meshNet_best_loss_weights.e236-loss0.01246-vloss0.0487.hdf5')),
+
+        # ((-1600, -400, 400, 400), 10, 'edges', False, 0, None),
+        # ((-1600, -400, 400, 400), 10, 'stacked_faces', False, 0, None),
+        # ((-1600, -400, 400, 400), 10, 'depth', False, 0, None),
+
+        # ((-1200, -400, 400, 400), 10, 'edges', False, 0, None),
+        # ((-1200, -400, 400, 400), 10, 'stacked_faces', False, 0, None),
+        # ((-1200, -400, 400, 400), 10, 'depth', False, 0, None),
+
+        # 1600x1600 - Step 40
+        ((-1600, -800, 1600, 1600), 40, 'edges', False, 0, None),
+        ((-1600, -800, 1600, 1600), 40, 'stacked_faces', False, 0, None),
+        ((-1600, -800, 1600, 1600), 40, 'depth', False, 0, None),
     ]
 
     idx = 0
     for roi, grid_step, x_type, load_weights, initial_epoch, weights_filename in session_list:
-        epochs = initial_epoch + 120
+        epochs = initial_epoch + 240
 
         sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only,
                                                    load_weights, x_type, y_type, mess)
