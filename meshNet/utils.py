@@ -34,11 +34,15 @@ class SessionInfo:
 
 
 def get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only, load_weights, x_type, y_type,
-                             mess):
+                             mess, fine_tune):
     title = "meshNet"
 
+    if fine_tune and not load_weights:
+        raise Exception("Fine-tuning initial weight does not make much sense")
+    resume_and_fine_tune = 'Finetune' if load_weights and fine_tune else 'Resume' if load_weights else ''
+
     suffix = "_%s%s_%s_%sEpochs_%s_ROI_%s_%s_%s_%s_GridStep%s_%s_%s%s" % \
-             ('Test' if test_only else 'Train', 'Resume' if load_weights else '', model_type, epochs, mesh_name,
+             ('Test' if test_only else 'Train', resume_and_fine_tune, model_type, epochs, mesh_name,
               roi[0], roi[1], roi[2], roi[3], grid_step, y_type, x_type, '_MESS' if mess else '')
 
     sess_info = SessionInfo(title, suffix=suffix)
