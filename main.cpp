@@ -93,6 +93,9 @@ DEFINE_double(min_data_threshold, 0 /*0.003*/, "Minimum data (pixels) percentage
 DEFINE_double(min_sky_precent, 0.5, "Minimum of most upper line to be BG - I.e. Sky");
 //DEFINE_int32(kernel_size, 15, "Kernel size to apply on image before masking with faces");
 
+DEFINE_bool(sample_map_bw_invert, false, "When true - Invert black-white colors");
+DEFINE_int32(sample_map_circle_rad, 3, "Circle radius drawn on sample map");
+
 DEFINE_int32(win_width, 400, "Width of the main window");
 DEFINE_int32(win_height, 300, "Height of the main window");
 DEFINE_bool(upper_map_crop, true, "Show only sample_rect in upper map");
@@ -2142,6 +2145,10 @@ void loadModelMap(const std::string &modelFile)
         return;
     }
 
+    std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
+    gOrthoProjData.read(orthoDataFileName);
+    DBG("Model Ortho Projection data " << gOrthoProjData);
+
     gSamplesMap = gModelMap.clone();
     cvtColor(gModelMap, gModelMap, CV_BGR2GRAY); // Perform gray scale conversion
     gModelMap = gModelMap.setTo(255, gModelMap > 0);
@@ -2149,8 +2156,22 @@ void loadModelMap(const std::string &modelFile)
     //imshowAndWait(gModelMap, 0);
 
     gSamplesROI = cv::Rect(cv::Point(), gModelMap.size()); // Entire map
-    if (!FLAGS_sample_rect.empty())
+    if (!FLAGS_world_sample_rect.empty())
+    {
+        cv::Rect rect = parseRectStr(FLAGS_world_sample_rect); // User ROI in world coordinates
+
+        cv::Point3f p3f_1(rect.x, rect.y, 0);
+        cv::Point p1 = gOrthoProjData.convertWorldPointToMap(p3f_1, gModelMap.size());
+
+        cv::Point3f p3f_2(rect.br().x, rect.br().y, 0);
+        cv::Point p2 = gOrthoProjData.convertWorldPointToMap(p3f_2, gModelMap.size());
+
+        gSamplesROI = cv::Rect(p1, p2);
+    }
+    else if (!FLAGS_sample_rect.empty())
+    {
         gSamplesROI = parseRectStr(FLAGS_sample_rect); // User ROI
+    }
 
     std::string groundLevelFileName = prefix + "_ground_level_map.png";
     gGroundLevelMap = cv::imread(groundLevelFileName);
@@ -2167,10 +2188,6 @@ void loadModelMap(const std::string &modelFile)
 
     if (gModelMap.size() != gGroundLevelMap.size()) // Sanity
         throw std::runtime_error("gModelMap.size() != gGroundLevelMap.size()");
-
-    std::string orthoDataFileName = prefix + "_map_ortho_data.txt";
-    gOrthoProjData.read(orthoDataFileName);
-    DBG("Model Ortho Projection data " << gOrthoProjData);
 }
 
 void getYawPitchRollFromXf(const trimesh::xform &someXf, float &yawDeg, float &pitchDeg, float &rollDeg)
@@ -3086,7 +3103,7 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
 {
     cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
 
-    if (!FLAGS_sample_rect.empty())
+    if (!FLAGS_sample_rect.empty() || !FLAGS_world_sample_rect.empty())
     {
         float thicknessFactor = gModelMap.cols / FLAGS_win_width;
         cv::rectangle(colorMap, gSamplesROI, green, 1 * thicknessFactor);
@@ -3116,7 +3133,7 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
         color = goodColor;
     }
 
-    cv::circle(colorMap, mapPoint, 3, color, CV_FILLED);
+    cv::circle(colorMap, mapPoint, FLAGS_sample_map_circle_rad, color, CV_FILLED);
 }
 
 void fillEachPointPoses(DataSet &dataSet)
@@ -3227,6 +3244,13 @@ void populateXfVector()
     DBG("xMin [" << xMin << "], xMax [" << xMax << "], yMin [" << yMin << "], yMax [" << yMax << "]");
 
     float groundZ = 0; // TODO: Take the value from the model min Z or calc min for the neighborhood
+
+    if (FLAGS_sample_map_bw_invert)
+    {
+        cv::Mat invertSampleMap(gSamplesMap.size(), gSamplesMap.type(), cv::Scalar(255, 255, 255));
+        invertSampleMap -= gSamplesMap;
+        gSamplesMap = invertSampleMap;
+    }
 
     if (!FLAGS_sample_angle_only.empty())
     {
