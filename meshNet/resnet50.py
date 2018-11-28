@@ -309,6 +309,26 @@ def ResNet50(include_top=True, weights='imagenet',
     return model
 
 
+def model_compile(model, multi_gpu=False, optimizer=None, loss=None):
+    if optimizer is None:
+        optimizer = Adadelta()
+        # optimizer = Adam(lr=0.001)
+    if loss is None:
+        loss = {'xyz_out': euc_loss_x, 'rot_out': euc_loss_q}
+
+    if multi_gpu:
+        from keras.utils import multi_gpu_model
+
+        # Replicates the model on 2 GPUs.
+        # This assumes that your machine has 2 available GPUs.
+        parallel_model = multi_gpu_model(model, gpus=2)
+        parallel_model.compile(optimizer=optimizer, loss=loss)
+        return parallel_model
+    else:
+        model.compile(optimizer=optimizer, loss=loss)
+        return model
+
+
 def resnet50_regression_train(image_shape, xy_nb_outs, rot_nb_outs, multi_gpu=False, optimizer=None, loss=None):
     """See some documentation at original function ResNet50()
     """

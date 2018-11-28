@@ -11,7 +11,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import matplotlib
 # Force matplotlib to not use any Xwindows backend.
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
@@ -24,13 +24,16 @@ import utils
 USE_OPENCV = False
 
 
-def imshow(win_title, img):
+def imshow(win_title, img, use_opencv=None):
+    if use_opencv is None:
+        use_opencv = USE_OPENCV
+
     img_range = (np.min(img), np.max(img))
     if img.dtype in [np.float, np.float32, np.float64] and (img_range[0] < 0 or img_range[1] > 1):
         print("Floating image not in [0, 1]. Converting to [0, 1]...")
         img = utils.min_max_scale(img, img_range, (0, 1))
 
-    if USE_OPENCV:
+    if use_opencv:
         cv2.imshow(win_title, img)
         key = cv2.waitKey(0) & 0xFF
         return key

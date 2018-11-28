@@ -528,6 +528,49 @@ def auto_collect_data(data_dir, image_size, x_type, roi, grid_step, part_of_data
     return (labels_train, file_urls_train, labels_test, file_urls_test) if image_size is None else \
         (x_train, labels_train, file_urls_train, x_test, labels_test, file_urls_test)
 
+# Keep only part of the samples. Makes a sparser 4D-grid
+def filter_angles(x_train, labels_train, file_urls_train):
+    yaw_list = np.linspace(0, 360, 9)
+    pitch_list = [-6, -12]
+    print("Filtering angles. Leaving pitch", pitch_list, "and yaw", yaw_list)
+
+    x_train_new = []
+    labels_train_new = []
+    file_urls_train_new = []
+
+    for i, label in enumerate(labels_train):
+        if label[0][3] in yaw_list and label[0][4] in pitch_list:
+            x_train_new.append(x_train[i])
+            labels_train_new.append(label)
+            file_urls_train_new.append(file_urls_train[i])
+
+    x_train_new = np.asarray(x_train_new)
+    labels_train_new = np.asarray(labels_train_new)
+    file_urls_train_new = np.asarray(file_urls_train_new)
+
+    return x_train_new, labels_train_new, file_urls_train_new
+
+
+# Keep some percentage of the test samples. Used for faster training
+def filter_tests(x_test, labels_test, file_urls_test, p=0.3):
+    print("Filtering test set. p=", p)
+
+    x_test_new = []
+    labels_test_new = []
+    file_urls_test_new = []
+    for i, label in enumerate(labels_test):
+        c = np.random.rand(1)
+        if c < p:
+            x_test_new.append(x_test[i])
+            labels_test_new.append(label)
+            file_urls_test_new.append(file_urls_test[i])
+
+    x_test_new = np.asarray(x_test_new)
+    labels_test_new = np.asarray(labels_test_new)
+    file_urls_test_new = np.asarray(file_urls_test_new)
+
+    return x_test_new, labels_test_new, file_urls_test_new
+
 
 class DataLoader:
     def __init__(self):
@@ -598,6 +641,12 @@ class DataLoader:
                 self.x_train, _, self.x_test, self.labels_train, _, self.labels_test, self.file_urls_train, _, \
                     self.file_urls_test = \
                     split.split_data(self.x_train, self.labels_train, 0, 0.2, file_names=self.file_urls_train)
+
+        # self.x_train, self.labels_train, self.file_urls_train = filter_angles(
+        #     self.x_train, self.labels_train, self.file_urls_train)
+
+        # self.x_test, self.labels_test, self.file_urls_test = filter_tests(
+        #     self.x_test, self.labels_test, self.file_urls_test)
 
         print("Precessing data...")
         self.y_train, self.y_test, self.y_min_max = process_labels(self.labels_train, self.labels_test, y_type)
