@@ -85,6 +85,7 @@ DEFINE_string(sample_rect, "", "Rect in map dimensions to perform sampling. Form
 DEFINE_string(world_sample_rect, "", "Rect in world dimensions to perform all angles sampling");
 DEFINE_string(sample_angle_only, "", "Single x,y in map dimensions to perform all angles sampling");
 DEFINE_bool(sample_depth, true, "When true - Saves also depth maps in .exr format");
+DEFINE_bool(draw_sample_rect, true, "When true - Draws a green rect on the sampling map working AOI");
 
 DEFINE_double(crop_upper_part, 0 /*0.33333*/, "Part of image to crop from top. 0- ignore");
 DEFINE_int32(min_edge_pixels, 30, "Minimum number of pixels required for each edge");
@@ -3103,7 +3104,7 @@ void checkPointAndSetZ(const cv::Point3f &p, std::vector<cv::Point3f> &samplePoi
 {
     cv::Point mapPoint = gOrthoProjData.convertWorldPointToMap(p, gModelMap.size());
 
-    if (!FLAGS_sample_rect.empty() || !FLAGS_world_sample_rect.empty())
+    if (FLAGS_draw_sample_rect && (!FLAGS_sample_rect.empty() || !FLAGS_world_sample_rect.empty()))
     {
         float thicknessFactor = gModelMap.cols / FLAGS_win_width;
         cv::rectangle(colorMap, gSamplesROI, green, 1 * thicknessFactor);
