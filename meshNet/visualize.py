@@ -11,7 +11,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import matplotlib
 # Force matplotlib to not use any Xwindows backend.
-# matplotlib.use('Agg')
+# See- https://stackoverflow.com/questions/4931376/generating-matplotlib-graphs-without-a-running-x-server
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 

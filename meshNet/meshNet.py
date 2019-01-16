@@ -545,6 +545,15 @@ if __name__ == '__main__':
         # Run area again to compare result when trained with pre-train weights of another area and grid step - consider using in the paper
         # ((-800, -800, 800, 800), 20, 'stacked_faces', True, 0, os.path.join(model_sessions_outputs, 'gridStep10/-1600_-800_400_400/meshNet_2018_07_12-01_02_18_Train_resnet_240Epochs_berlin_ROI_-1600_-800_400_400_GridStep10_quaternion_stacked_faces/hdf5/meshNet_best_loss_weights.e239-loss0.01256-vloss0.0403.hdf5'), False),
 
+        ((-800, -800, 800, 800), 20, 'edges', False, 0, None, False),
+        ((-800, -800, 800, 800), 20, 'stacked_faces', False, 0, None, False),
+        ((-800, -800, 800, 800), 20, 'depth', False, 0, None, False),
+
+        # ((-1600, 0, 800, 800), 20, 'edges', False, 0, None, False),
+        # ((-1600, 0, 800, 800), 20, 'stacked_faces', False, 0, None, False),
+        # ((-1600, 0, 800, 800), 20, 'depth', False, 0, None, False),
+
+        # 1600x1600
         # ((-1600, -800, 1600, 1600), 20, 'edges', True, 161, os.path.join(model_sessions_outputs, 'meshNet_2018_10_18-11_03_39_Train_resnet_240Epochs_berlin_ROI_-1600_-800_1600_1600_GridStep20_quaternion_edges/hdf5/meshNet_best_loss_weights.e160-loss0.01573-vloss0.2331.hdf5'), False),
         # DID not run - MemoryError ((-1600, -800, 1600, 1600), 20, 'stacked_faces', False, 0, None, False),
         # DID not run - MemoryError ((-1600, -800, 1600, 1600), 20, 'depth', False, 0, None, False),
@@ -602,7 +611,7 @@ if __name__ == '__main__':
 
     idx = 0
     for roi, grid_step, x_type, load_weights, initial_epoch, weights_filename, fine_tune in session_list:
-        epochs = initial_epoch + 120
+        epochs = initial_epoch + 240
 
         sess_info = utils.get_meshNet_session_info(mesh_name, model_type, roi, epochs, grid_step, test_only,
                                                    load_weights, x_type, y_type, mess, fine_tune)
